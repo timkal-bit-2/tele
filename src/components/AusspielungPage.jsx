@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { NewWebSocketProvider, useNewWebSocket } from '../hooks/useNewWebSocket.jsx'
+import { optimizeScrollAnimation, getOptimizedSettings, detectFreeTierHosting } from '../utils/performanceOptimizer.js'
 
 const AusspielungPageInternal = () => {
   const location = useLocation()
@@ -19,6 +20,11 @@ const AusspielungPageInternal = () => {
     onMessage,
     MESSAGE_TYPES
   } = useNewWebSocket()
+  
+  // Performance optimization for free tier hosting
+  const hostingInfo = detectFreeTierHosting()
+  const perfSettings = getOptimizedSettings()
+  const [performanceWarning, setPerformanceWarning] = useState(false)
 
   // Get data from location state
   const locationData = location.state || {}
@@ -258,6 +264,11 @@ const AusspielungPageInternal = () => {
           </div>
           
           <div className="flex items-center gap-4">
+            {hostingInfo.isFreeTier && (
+              <div className="text-xs px-2 py-1 rounded bg-orange-600 text-white font-medium">
+                ⚡ Free Tier - Reduzierte Performance
+              </div>
+            )}
             <div className={`text-xs px-2 py-1 rounded font-medium ${
               connectionStatus === 'connected' 
                 ? 'bg-green-600 text-white' 
@@ -334,13 +345,27 @@ const AusspielungPageInternal = () => {
             paddingBottom: '40px',
             whiteSpace: 'pre-wrap',
             wordWrap: 'break-word',
-            transform: `translateY(${-scrollPosition - 180}px) 
-                       scaleX(${currentSettings.mirrorHorizontal ? -1 : 1}) 
-                       scaleY(${currentSettings.mirrorVertical ? -1 : 1})`,
+            // Performance-optimized transform based on hosting provider
+            ...(() => {
+              const optimized = optimizeScrollAnimation(scrollPosition + 180, perfSettings)
+              return {
+                transform: `${optimized.transform} 
+                           scaleX(${currentSettings.mirrorHorizontal ? -1 : 1}) 
+                           scaleY(${currentSettings.mirrorVertical ? -1 : 1})`,
+                willChange: optimized.willChange,
+                backfaceVisibility: 'hidden',
+                perspective: '1000px'
+              }
+            })(),
             transition: 'none',
             width: '1000px',
             minWidth: '1000px',
-            textAlign: 'left'
+            textAlign: 'left',
+            // Font rendering optimization
+            WebkitFontSmoothing: 'antialiased',
+            MozOsxFontSmoothing: 'grayscale',
+            // Prevent layout shifts
+            contain: 'layout style paint'
           }}>
             {processedContent}
           </div>

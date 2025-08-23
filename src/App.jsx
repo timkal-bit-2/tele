@@ -345,27 +345,42 @@ const TeleprompterRegieInternal = ({ onReset }) => {
     document.body.removeChild(element)
   }
 
-  // Auto-scroll functionality (Memory-optimiert)
+  // Optimized auto-scroll with requestAnimationFrame for smooth 60fps
   useEffect(() => {
     if (playbackState.isScrolling) {
-      intervalRef.current = setInterval(() => {
+      let lastTime = performance.now()
+      
+      const animateScroll = (currentTime) => {
+        const deltaTime = (currentTime - lastTime) / 1000 // Convert to seconds
+        lastTime = currentTime
+        
         setScrollPosition(prev => {
-          const newPos = prev + (settings.speed * 10)
-          // Verhindere endlose Updates bei sehr hohen Werten
-          return Math.min(newPos, 50000) // Max 50k Pixel
+          // Calculate pixels per second based on speed
+          const pixelsPerSecond = settings.speed * 50 // Adjust multiplier for desired speed
+          const increment = pixelsPerSecond * deltaTime
+          const newPos = prev + increment
+          
+          // Prevent excessive values
+          return Math.min(newPos, 50000)
         })
-      }, 50)
+        
+        if (playbackState.isScrolling) {
+          intervalRef.current = requestAnimationFrame(animateScroll)
+        }
+      }
+      
+      intervalRef.current = requestAnimationFrame(animateScroll)
     } else {
       if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null // Explizit null setzen
+        cancelAnimationFrame(intervalRef.current)
+        intervalRef.current = null
       }
     }
 
     return () => {
       if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null // Cleanup
+        cancelAnimationFrame(intervalRef.current)
+        intervalRef.current = null
       }
     }
   }, [playbackState.isScrolling, settings.speed])

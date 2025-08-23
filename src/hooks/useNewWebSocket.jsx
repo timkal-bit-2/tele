@@ -106,21 +106,26 @@ export const NewWebSocketProvider = ({ children }) => {
     return sendMessage(MESSAGE_TYPES.LAYOUT_SETTINGS, layoutSettings)
   }, [sendMessage])
 
-  // Optimized scroll position with throttling for ultra-low latency
+  // Optimized scroll position with smart throttling for Render.com free tier
   const scrollThrottleRef = useRef(null)
+  const lastScrollSent = useRef(0)
   const sendScrollPosition = useCallback((scrollPosition) => {
-    // Clear previous throttle
-    if (scrollThrottleRef.current) {
-      clearTimeout(scrollThrottleRef.current)
+    const now = Date.now()
+    const timeSinceLastSend = now - lastScrollSent.current
+    
+    // Smart throttling: send immediately if significant change or enough time passed
+    const significantChange = Math.abs(scrollPosition - lastScrollSent.current) > 10
+    const enoughTimePassed = timeSinceLastSend > 50 // 20fps max for free tier
+    
+    if (significantChange || enoughTimePassed) {
+      lastScrollSent.current = scrollPosition
+      return sendMessage(MESSAGE_TYPES.SCROLL_POSITION, {
+        scrollPosition: Math.round(scrollPosition), // Round to reduce data
+        timestamp: now
+      })
     }
     
-    // Send immediately for responsive feel, throttle subsequent calls
-    const success = sendMessage(MESSAGE_TYPES.SCROLL_POSITION, {
-      scrollPosition,
-      timestamp: Date.now()
-    })
-    
-    return success
+    return false // Skipped for performance
   }, [sendMessage])
 
   const sendSettingsUpdate = useCallback((settings) => {
@@ -149,10 +154,10 @@ export const NewWebSocketProvider = ({ children }) => {
         setWs(websocket)
         setLastError(null)
         
-        // Start heartbeat - reduced interval for better connection monitoring
+        // Aggressive heartbeat for Render.com free tier (prevents sleeping)
         heartbeatIntervalRef.current = setInterval(() => {
           sendMessage(MESSAGE_TYPES.PING)
-        }, 10000) // 10 seconds for faster detection of connection issues
+        }, 5000) // 5 seconds to keep Render server awake
       }
 
       websocket.onmessage = (event) => {
