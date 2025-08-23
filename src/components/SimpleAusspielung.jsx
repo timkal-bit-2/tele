@@ -4,10 +4,18 @@ const SimpleAusspielung = () => {
   // State
   const [text, setText] = useState('Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\nUt enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\n\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\n\nSed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam.\n\nEaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.\n\nNemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores.\n\nEos qui ratione voluptatem sequi nesciunt neque porro quisquam est, qui dolorem ipsum quia dolor sit amet.\n\nConsectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam.\n\nAliquam quaerat voluptatem ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit.\n\nLaboriosam, nisi ut aliquid ex ea commodi consequatur quis autem vel eum iure reprehenderit qui in ea.\n\nVoluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla.\n\nPariatur at vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum.\n\nDeleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident.\n\nSimilique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga.\n\nEt harum quidem rerum facilis est et expedita distinctio nam libero tempore cum soluta nobis est.\n\nEligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus omnis voluptas.\n\nAssumenda est, omnis dolor repellendus temporibus autem quibusdam et aut officiis debitis aut rerum.\n\nNecessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae itaque earum.\n\nRerum hic tenetur a sapiente delectus ut aut reiciendis voluptatibus maiores alias consequatur aut.\n\nPerferendis doloribus asperiores repellat nam cum soluta nobis est eligendi optio cumque nihil impedit.\n\nQuo minus id quod maxime placeat facere possimus omnis voluptas assumenda est omnis dolor repellendus.\n\nTemporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut voluptates.\n\nRepudiandae sint et molestiae non recusandae itaque earum rerum hic tenetur a sapiente delectus.\n\nUt aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat. 🎉')
   const [isPlaying, setIsPlaying] = useState(false)
-  const [speed, setSpeed] = useState(300)
+  const [speed, setSpeed] = useState(3)
   const [scrollPosition, setScrollPosition] = useState(0)
   const [connectionStatus, setConnectionStatus] = useState('disconnected')
   const [debugLogs, setDebugLogs] = useState([])
+  
+  // Layout-Einstellungen
+  const [fontSize, setFontSize] = useState(36)
+  const [margin, setMargin] = useState(20)
+  
+  // Spiegelungsoptionen
+  const [flipHorizontal, setFlipHorizontal] = useState(false)
+  const [flipVertical, setFlipVertical] = useState(false)
   
   const teleprompterRef = useRef(null)
   const animationRef = useRef(null)
@@ -21,7 +29,7 @@ const SimpleAusspielung = () => {
 
   // WebSocket Verbindung
   useEffect(() => {
-    const wsUrl = import.meta.env.VITE_WS_URL || 'wss://tele-bs9i.onrender.com/ws'
+    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3002/ws'
     console.log('🔌 Simple Ausspielung: Connecting to WebSocket:', wsUrl)
     
     wsRef.current = new WebSocket(wsUrl)
@@ -68,12 +76,30 @@ const SimpleAusspielung = () => {
         }
 
         if (data.type === 'SIMPLE_MANUAL_POSITION') {
-          // Nur bei PAUSE: Position von Regie folgen
+          // Nur bei PAUSE: Position und Layout von Regie folgen
           if (!isPlaying) {
             addDebugLog(`📍 Following manual pos: ${Math.round(data.scrollPosition)}px`)
             setScrollPosition(data.scrollPosition)
             if (teleprompterRef.current) {
               teleprompterRef.current.scrollTop = data.scrollPosition
+            }
+            
+            // Layout-Einstellungen übernehmen wenn vorhanden
+            if (data.fontSize !== undefined) {
+              setFontSize(data.fontSize)
+              addDebugLog(`🔤 Font size: ${data.fontSize}px`)
+            }
+            if (data.margin !== undefined) {
+              setMargin(data.margin)
+              addDebugLog(`📏 Margin: ${data.margin}px`)
+            }
+            if (data.flipHorizontal !== undefined) {
+              setFlipHorizontal(data.flipHorizontal)
+              addDebugLog(`↔️ Horizontal flip: ${data.flipHorizontal}`)
+            }
+            if (data.flipVertical !== undefined) {
+              setFlipVertical(data.flipVertical)
+              addDebugLog(`↕️ Vertical flip: ${data.flipVertical}`)
             }
           } else {
             addDebugLog(`⏭️ Ignoring manual pos (playing): ${Math.round(data.scrollPosition)}px`)
@@ -129,9 +155,9 @@ const SimpleAusspielung = () => {
     
     if (maxScroll <= 0 || textLength <= 0) return 0
     
-    // Speed = Zeichen pro Minute (direkt)
-    // Wir wollen: textLength Zeichen in (textLength / speed) Minuten
-    const charsPerMinute = speed // Speed ist jetzt direkt cpm (180-800)
+    // Speed = Scale-Factor * 100 = tatsächliche CPM
+    // Wir wollen: textLength Zeichen in (textLength / charsPerMinute) Minuten
+    const charsPerMinute = speed * 100 // Speed 3 = 300 cpm
     const totalSeconds = textLength / charsPerMinute * 60 // Zeit in Sekunden für ganzen Text
     const pixelsPerSecond = maxScroll / totalSeconds
     const pixelsPerTick = pixelsPerSecond / 60 // 60fps
@@ -145,7 +171,7 @@ const SimpleAusspielung = () => {
     
     if (isPlaying && teleprompterRef.current) {
       const scrollRate = calculateScrollRate()
-      const totalDuration = text.length / speed * 60 // Sekunden
+      const totalDuration = text.length / (speed * 100) * 60 // Sekunden
       
       addDebugLog(`🚀 Starting scroll: ${scrollRate.toFixed(2)}px/tick, ${totalDuration.toFixed(1)}s total`)
       
@@ -208,30 +234,48 @@ const SimpleAusspielung = () => {
             {connectionStatus.toUpperCase()}
           </div>
           <div className="text-xs text-gray-400">
-            {isPlaying ? '▶️ PLAYING' : '⏸️ PAUSED'} | Speed: {speed}
+            {isPlaying ? '▶️ PLAYING' : '⏸️ PAUSED'} | Speed: {speed} | H: {flipHorizontal ? 'ON' : 'OFF'} | V: {flipVertical ? 'ON' : 'OFF'}
           </div>
         </div>
       </div>
 
       {/* Teleprompter Display - FULLSCREEN */}
-      <div 
+            <div 
         ref={teleprompterRef}
-        className="flex-1 p-12 overflow-hidden relative"
+        className="flex-1 overflow-hidden relative"
         style={{
-          backgroundColor: '#000000'
+          backgroundColor: '#000000',
+          padding: `${margin}px`,
+          transform: `scale(${flipHorizontal ? -1 : 1}, ${flipVertical ? -1 : 1})`,
+          transformOrigin: 'center center'
         }}
       >
-        <div 
+        <div
           className="text-white leading-relaxed"
           style={{
             lineHeight: '1.8',
-            fontSize: '36px',
+            fontSize: `${fontSize}px`,
             fontFamily: 'system-ui, -apple-system, sans-serif'
           }}
         >
+          {/* 5 Leerzeilen vor dem Text */}
+          {Array(5).fill(null).map((_, index) => (
+            <div key={`before-${index}`} className="mb-4">
+              &nbsp;
+            </div>
+          ))}
+          
+          {/* Haupttext */}
           {text.split('\n').map((line, index) => (
             <div key={index} className="mb-4">
               {line || '\u00A0'}
+            </div>
+          ))}
+          
+          {/* 5 Leerzeilen nach dem Text */}
+          {Array(5).fill(null).map((_, index) => (
+            <div key={`after-${index}`} className="mb-4">
+              &nbsp;
             </div>
           ))}
         </div>
