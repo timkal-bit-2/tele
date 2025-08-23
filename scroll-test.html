@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scroll Test</title>
+    <style>
+        body { margin: 0; padding: 20px; font-family: Arial, sans-serif; background: #111; color: white; }
+        .container { height: 400px; overflow-y: auto; border: 2px solid #333; padding: 20px; background: #222; }
+        .content { height: 1200px; background: linear-gradient(to bottom, #333, #555); padding: 20px; }
+        .controls { margin: 20px 0; }
+        button { padding: 10px 20px; margin: 5px; background: #007acc; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #005a9e; }
+        .info { margin: 10px 0; padding: 10px; background: #333; border-radius: 5px; }
+        #log { height: 200px; overflow-y: auto; background: #000; padding: 10px; border-radius: 5px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <h1>Teleprompter Scroll Test</h1>
+    
+    <div class="controls">
+        <button onclick="startScroll()">Start Scroll</button>
+        <button onclick="stopScroll()">Stop Scroll</button>
+        <button onclick="resetScroll()">Reset</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <div class="info">
+        <div>Scroll Position: <span id="position">0</span>%</div>
+        <div>Speed: <span id="speed">60</span> px/s</div>
+        <div>Status: <span id="status">Stopped</span></div>
+    </div>
+
+    <div class="container" id="scrollContainer">
+        <div class="content" id="scrollContent">
+            <h2>Test Content für Scrolling</h2>
+            <p>Dies ist ein Test-Text für das Teleprompter-Scrolling.</p>
+            <p>Der Text sollte automatisch von unten nach oben scrollen.</p>
+            <p>Wie bei einem echten Teleprompter.</p>
+            <br><br>
+            <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+            <p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+            <br><br>
+            <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+            <p>Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+            <br><br>
+            <p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</p>
+            <p>Totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt.</p>
+            <br><br>
+            <p>Ende des Test-Textes. Das Scrolling sollte hier zum Ende kommen und wieder von vorne beginnen.</p>
+        </div>
+    </div>
+
+    <div id="log"></div>
+
+    <script>
+        let isScrolling = false;
+        let animationId = null;
+        
+        const container = document.getElementById('scrollContainer');
+        const content = document.getElementById('scrollContent');
+        const logDiv = document.getElementById('log');
+        const positionSpan = document.getElementById('position');
+        const statusSpan = document.getElementById('status');
+
+        function log(message) {
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${time}] ${message}<br>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        function updateInfo() {
+            const scrollTop = container.scrollTop;
+            const scrollHeight = container.scrollHeight;
+            const clientHeight = container.clientHeight;
+            const maxScroll = scrollHeight - clientHeight;
+            const percentage = maxScroll > 0 ? (scrollTop / maxScroll) * 100 : 0;
+            
+            positionSpan.textContent = Math.round(percentage);
+            
+            log(`Scroll Info: top=${scrollTop}, height=${scrollHeight}, client=${clientHeight}, max=${maxScroll}, %=${percentage.toFixed(1)}`);
+        }
+
+        function startScroll() {
+            if (isScrolling) return;
+            
+            isScrolling = true;
+            statusSpan.textContent = 'Scrolling';
+            log('=== STARTING SCROLL ===');
+            
+            updateInfo();
+            
+            const pixelsPerSecond = 60;
+            let lastTime = performance.now();
+
+            function animate(currentTime) {
+                if (!isScrolling) return;
+
+                const deltaTime = (currentTime - lastTime) / 1000;
+                lastTime = currentTime;
+
+                const scrollTop = container.scrollTop;
+                const scrollHeight = container.scrollHeight;
+                const clientHeight = container.clientHeight;
+                const maxScroll = scrollHeight - clientHeight;
+
+                const newScrollTop = scrollTop + (pixelsPerSecond * deltaTime);
+
+                if (newScrollTop >= maxScroll) {
+                    container.scrollTop = 0;
+                    log('RESET: Reached end, scrolling back to top');
+                } else {
+                    container.scrollTop = newScrollTop;
+                    
+                    const percentage = maxScroll > 0 ? (newScrollTop / maxScroll) * 100 : 0;
+                    positionSpan.textContent = Math.round(percentage);
+                    
+                    if (Math.round(percentage) % 10 === 0 && Math.round(percentage) !== lastLoggedPercentage) {
+                        log(`Progress: ${Math.round(percentage)}%`);
+                        lastLoggedPercentage = Math.round(percentage);
+                    }
+                }
+
+                if (isScrolling) {
+                    animationId = requestAnimationFrame(animate);
+                }
+            }
+
+            let lastLoggedPercentage = -1;
+            animationId = requestAnimationFrame(animate);
+        }
+
+        function stopScroll() {
+            isScrolling = false;
+            statusSpan.textContent = 'Stopped';
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+            log('=== SCROLL STOPPED ===');
+        }
+
+        function resetScroll() {
+            stopScroll();
+            container.scrollTop = 0;
+            positionSpan.textContent = '0';
+            log('=== SCROLL RESET ===');
+            updateInfo();
+        }
+
+        function clearLog() {
+            logDiv.innerHTML = '';
+        }
+
+        // Test on load
+        window.onload = function() {
+            log('=== SCROLL TEST LOADED ===');
+            updateInfo();
+        };
+    </script>
+</body>
+</html>

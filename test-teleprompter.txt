@@ -1,0 +1,21 @@
+Willkommen zum Live Teleprompter Test!
+
+Dies ist ein Beispieltext zum Testen der Teleprompter-Funktionen.
+
+Der Text sollte:
+- Korrekt formatiert werden
+- Smooth scrollen
+- Live zwischen Input und Output synchronisiert werden
+
+Verschiedene Formatierungen:
+- Normaler Text
+- **Fetter Text** (wird als HTML übertragen)
+- *Kursiver Text*
+- __Unterstrichener Text__
+
+Längerer Absatz zum Testen der Scroll-Funktionalität:
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+
+Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+
+Ende des Test-Texts.
