@@ -106,22 +106,42 @@ export const NewWebSocketProvider = ({ children }) => {
     return sendMessage(MESSAGE_TYPES.LAYOUT_SETTINGS, layoutSettings)
   }, [sendMessage])
 
-  // Optimized scroll position with smart throttling for Render.com free tier
+  // Super optimized scroll position with adaptive throttling
   const scrollThrottleRef = useRef(null)
   const lastScrollSent = useRef(0)
-  const sendScrollPosition = useCallback((scrollPosition) => {
+  const lastPositionSent = useRef(0)
+  const sendScrollPosition = useCallback((scrollPosition, superLightMode = false) => {
     const now = Date.now()
     const timeSinceLastSend = now - lastScrollSent.current
     
-    // Smart throttling: send immediately if significant change or enough time passed
-    const significantChange = Math.abs(scrollPosition - lastScrollSent.current) > 10
+    // Super Light Mode: Ultra aggressive throttling
+    if (superLightMode) {
+      const significantChange = Math.abs(scrollPosition - lastPositionSent.current) > 20
+      const enoughTimePassed = timeSinceLastSend > 200 // 5fps for super light
+      
+      if (significantChange || enoughTimePassed) {
+        lastScrollSent.current = now
+        lastPositionSent.current = scrollPosition
+        return sendMessage(MESSAGE_TYPES.SCROLL_POSITION, {
+          scrollPosition: Math.round(scrollPosition / 10) * 10, // Round to 10px increments
+          timestamp: now,
+          superLight: true
+        })
+      }
+      return false
+    }
+    
+    // Normal throttling for regular mode
+    const significantChange = Math.abs(scrollPosition - lastPositionSent.current) > 10
     const enoughTimePassed = timeSinceLastSend > 50 // 20fps max for free tier
     
     if (significantChange || enoughTimePassed) {
-      lastScrollSent.current = scrollPosition
+      lastScrollSent.current = now
+      lastPositionSent.current = scrollPosition
       return sendMessage(MESSAGE_TYPES.SCROLL_POSITION, {
-        scrollPosition: Math.round(scrollPosition), // Round to reduce data
-        timestamp: now
+        scrollPosition: Math.round(scrollPosition),
+        timestamp: now,
+        superLight: false
       })
     }
     

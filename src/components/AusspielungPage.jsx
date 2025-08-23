@@ -70,11 +70,12 @@ const AusspielungPageInternal = () => {
   useEffect(() => {
     localStorage.setItem('ausspielungScrollPosition', scrollPosition.toString())
     
-    // Send scroll position via WebSocket immediately for ultra-low latency
+    // Send scroll position with super light mode awareness
     if (isConnected) {
-      sendScrollPosition(scrollPosition)
+      const superLightMode = currentSettings.superLightMode || false
+      sendScrollPosition(scrollPosition, superLightMode)
     }
-  }, [scrollPosition, isConnected, sendScrollPosition])
+  }, [scrollPosition, isConnected, sendScrollPosition, currentSettings.superLightMode])
 
   // Listen for scroll position updates from main app
   useEffect(() => {
@@ -264,7 +265,12 @@ const AusspielungPageInternal = () => {
           </div>
           
           <div className="flex items-center gap-4">
-            {hostingInfo.isFreeTier && (
+            {currentSettings.superLightMode && (
+              <div className="text-xs px-2 py-1 rounded bg-purple-600 text-white font-medium">
+                ⚡ Super Light Modus
+              </div>
+            )}
+            {hostingInfo.isFreeTier && !currentSettings.superLightMode && (
               <div className="text-xs px-2 py-1 rounded bg-orange-600 text-white font-medium">
                 ⚡ Free Tier - Reduzierte Performance
               </div>

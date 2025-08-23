@@ -225,7 +225,8 @@ const TeleprompterRegieInternal = ({ onReset }) => {
     readingLinePosition: 25,
     mirrorHorizontal: false,
     mirrorVertical: false,
-    emptyLinesAtStart: 2
+    emptyLinesAtStart: 2,
+    superLightMode: false
   })
   const [scrollPosition, setScrollPosition] = useState(0)  // Always start at 0 for mouse scroll
   const [isDraggingLine, setIsDraggingLine] = useState(false)
@@ -248,11 +249,11 @@ const TeleprompterRegieInternal = ({ onReset }) => {
   useEffect(() => {
     localStorage.setItem('mainScrollPosition', scrollPosition.toString())
     
-    // Send scroll position via WebSocket if connected
+    // Send scroll position via WebSocket if connected (with super light mode awareness)
     if (isConnected) {
-      sendScrollPosition(scrollPosition)
+      sendScrollPosition(scrollPosition, settings.superLightMode)
     }
-  }, [scrollPosition, isConnected, sendScrollPosition])
+  }, [scrollPosition, isConnected, sendScrollPosition, settings.superLightMode])
 
   // Listen for scroll position updates from Ausspielung page
   useEffect(() => {
@@ -804,7 +805,7 @@ const TeleprompterRegieInternal = ({ onReset }) => {
                   📺 Ausspielung öffnen
                 </button>
                 
-                {/* Mirror Controls */}
+                                {/* Mirror Controls */}
                 <div className="space-y-2">
                   <label className="flex items-center text-xs text-gray-300">
                     <input
@@ -825,6 +826,25 @@ const TeleprompterRegieInternal = ({ onReset }) => {
                     Vertikal spiegeln
                   </label>
                 </div>
+                
+                {/* Super Light Mode */}
+                <div className="border-t border-gray-700 pt-3 mt-3">
+                  <label className="flex items-center text-xs text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={settings.superLightMode}
+                      onChange={(e) => updateSetting('superLightMode', e.target.checked)}
+                      className="mr-2"
+                    />
+                    <span className="flex items-center gap-1">
+                      ⚡ Super Light Modus
+                      <span className="text-orange-400 text-xs">(Free Tier)</span>
+                    </span>
+                  </label>
+                  <div className="text-xs text-gray-500 mt-1 ml-5">
+                    Maximale Performance für Render.com Free Tier
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -833,28 +853,99 @@ const TeleprompterRegieInternal = ({ onReset }) => {
 
       {/* Right Panel - Preview and Editor */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-        {/* Top - Teleprompter Preview */}
-        <div className="flex-1 bg-gray-950 min-h-0">
-          <TeleprompterPreview
-            previewRef={previewRef}
-            rawContent={rawContent}
-            settings={settings}
-            scrollPosition={scrollPosition}
-            playbackState={playbackState}
-            isDraggingText={isDraggingText}
-            isDraggingLine={isDraggingLine}
-            handleWheel={handleWheel}
-            handleMouseDown={handleMouseDown}
-            handleLineMouseDown={handleLineMouseDown}
-            showControls={true}
-            isSmall={false}
-            enableMirroring={false}
-          />
-        </div>
+        {settings.superLightMode ? (
+          /* Super Light Mode: 50/50 Split */
+          <div className="flex-1 flex overflow-hidden">
+            {/* Left: Text Editor with Reading Line */}
+            <div className="flex-1 bg-gray-900 border-r border-gray-700 flex flex-col">
+              <div className="bg-gray-800 px-4 py-2 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
+                <h3 className="text-sm font-medium text-gray-300">✏️ Text Editor (Super Light)</h3>
+                <div className="flex items-center gap-3">
+                  <div className="text-xs text-orange-400">
+                    ⚡ Performance Modus
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    Zeichen: {rawContent.length}
+                  </div>
+                </div>
+              </div>
+              <div className="flex-1 relative overflow-hidden">
+                <textarea
+                  value={rawContent}
+                  onChange={(e) => setRawContent(e.target.value)}
+                  className="w-full h-full p-4 bg-gray-900 text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm leading-relaxed"
+                  placeholder="Geben Sie hier Ihren Teleprompter-Text ein..."
+                  spellCheck={false}
+                />
+                {/* Reading Line in Text Editor */}
+                {settings.showReadingLine && (
+                  <div style={{
+                    position: 'absolute',
+                    top: `${settings.readingLinePosition}%`,
+                    left: 0,
+                    right: 0,
+                    height: '2px',
+                    backgroundColor: 'red',
+                    zIndex: 10,
+                    opacity: 0.8,
+                    pointerEvents: 'none'
+                  }} />
+                )}
+              </div>
+            </div>
+            
+            {/* Right: Small Static Preview */}
+            <div className="w-80 bg-gray-950 flex flex-col">
+              <div className="bg-gray-800 px-4 py-2 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
+                <h3 className="text-sm font-medium text-gray-300">📺 Static Preview</h3>
+                <div className="text-xs text-gray-500">
+                  Font Preview
+                </div>
+              </div>
+              <div className="flex-1">
+                <TeleprompterPreview
+                  previewRef={null}
+                  rawContent={rawContent}
+                  settings={settings}
+                  scrollPosition={0}
+                  playbackState={{isScrolling: false}}
+                  isDraggingText={false}
+                  isDraggingLine={false}
+                  handleWheel={() => {}}
+                  handleMouseDown={null}
+                  handleLineMouseDown={null}
+                  showControls={false}
+                  isSmall={true}
+                  enableMirroring={true}
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Normal Mode: Large Preview + Editor */
+          <>
+            {/* Top - Teleprompter Preview */}
+            <div className="flex-1 bg-gray-950 min-h-0">
+              <TeleprompterPreview
+                previewRef={previewRef}
+                rawContent={rawContent}
+                settings={settings}
+                scrollPosition={scrollPosition}
+                playbackState={playbackState}
+                isDraggingText={isDraggingText}
+                isDraggingLine={isDraggingLine}
+                handleWheel={handleWheel}
+                handleMouseDown={handleMouseDown}
+                handleLineMouseDown={handleLineMouseDown}
+                showControls={true}
+                isSmall={false}
+                enableMirroring={false}
+              />
+            </div>
 
-        {/* Bottom - Text Editor (Fixed Height) */}
-        <div className="h-80 bg-gray-900 border-t border-gray-700 flex-shrink-0">
-          <div className="h-full flex flex-col">
+            {/* Bottom - Text Editor (Fixed Height) */}
+            <div className="h-80 bg-gray-900 border-t border-gray-700 flex-shrink-0">
+              <div className="h-full flex flex-col">
             <div className="bg-gray-800 px-4 py-2 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
               <h3 className="text-sm font-medium text-gray-300">✏️ Text Editor</h3>
               <div className="flex items-center gap-3">
@@ -916,8 +1007,10 @@ const TeleprompterRegieInternal = ({ onReset }) => {
               placeholder="Geben Sie hier Ihren Teleprompter-Text ein..."
               spellCheck={false}
             />
-          </div>
-        </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
       </div>
     </div>
