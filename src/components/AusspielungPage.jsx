@@ -1,21 +1,37 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { NewWebSocketProvider, useNewWebSocket } from '../hooks/useNewWebSocket.jsx'
 
-const AusspielungPage = () => {
+const AusspielungPageInternal = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [scrollPosition, setScrollPosition] = useState(0)
   const [currentSettings, setCurrentSettings] = useState({})
+  const [rawContent, setRawContent] = useState('')
   const previewRef = useRef(null)
+  
+  // WebSocket connection
+  const {
+    connectionStatus,
+    isConnected,
+    sendScrollPosition,
+    onMessage,
+    MESSAGE_TYPES
+  } = useNewWebSocket()
 
   // Get data from location state
-  const { rawContent = '', settings = {}, initialScrollPosition = 0 } = location.state || {}
+  const locationData = location.state || {}
+  const initialContent = locationData.rawContent || ''
+  const initialSettings = locationData.settings || {}
+  const initialScrollPosition = locationData.initialScrollPosition || 0
 
-  // Initialize with settings from location state
+  // Initialize with data from location state
   useEffect(() => {
-    setCurrentSettings(settings)
-  }, [settings])
+    setCurrentSettings(initialSettings)
+    setRawContent(initialContent)
+    setScrollPosition(initialScrollPosition)
+  }, [initialSettings, initialContent, initialScrollPosition])
 
   // Debug log to check settings
   useEffect(() => {
@@ -44,10 +60,15 @@ const AusspielungPage = () => {
     setScrollPosition(initialScrollPosition)
   }, [initialScrollPosition])
 
-  // Sync scroll position back to main app via localStorage
+  // Sync scroll position back to main app via localStorage and WebSocket
   useEffect(() => {
     localStorage.setItem('ausspielungScrollPosition', scrollPosition.toString())
-  }, [scrollPosition])
+    
+    // Send scroll position via WebSocket immediately for ultra-low latency
+    if (isConnected) {
+      sendScrollPosition(scrollPosition)
+    }
+  }, [scrollPosition, isConnected, sendScrollPosition])
 
   // Listen for scroll position updates from main app
   useEffect(() => {
@@ -76,6 +97,46 @@ const AusspielungPage = () => {
       clearInterval(pollInterval)
     }
   }, [scrollPosition])
+
+  // Listen for WebSocket messages from Regie
+  useEffect(() => {
+    const cleanupFunctions = []
+
+    // Listen for scroll position updates
+    cleanupFunctions.push(
+      onMessage(MESSAGE_TYPES.SCROLL_POSITION, (data) => {
+        console.log('📥 Received scroll position from Regie:', data.scrollPosition)
+        if (Math.abs(data.scrollPosition - scrollPosition) > 5) {
+          setScrollPosition(data.scrollPosition)
+        }
+      })
+    )
+
+    // Listen for content updates
+    cleanupFunctions.push(
+      onMessage(MESSAGE_TYPES.CONTENT_UPDATE, (data) => {
+        console.log('📥 Received content update from Regie')
+        if (data.content !== undefined) {
+          setRawContent(data.content)
+        }
+        if (data.layoutSettings) {
+          setCurrentSettings(prev => ({ ...prev, ...data.layoutSettings }))
+        }
+      })
+    )
+
+    // Listen for settings updates
+    cleanupFunctions.push(
+      onMessage(MESSAGE_TYPES.SETTINGS_UPDATE, (data) => {
+        console.log('📥 Received settings update from Regie:', data)
+        setCurrentSettings(data)
+      })
+    )
+
+    return () => {
+      cleanupFunctions.forEach(cleanup => cleanup())
+    }
+  }, [onMessage, MESSAGE_TYPES, scrollPosition])
 
   // Handle wheel scrolling
   const handleWheel = (e) => {
@@ -149,8 +210,26 @@ const AusspielungPage = () => {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
   }, [])
 
+  // Process content - fall back to localStorage if WebSocket content is empty
+  useEffect(() => {
+    if (!rawContent) {
+      const savedFiles = localStorage.getItem('teleprompter-files')
+      if (savedFiles) {
+        try {
+          const files = JSON.parse(savedFiles)
+          if (files.length > 0) {
+            setRawContent(files[0].content)
+          }
+        } catch (error) {
+          console.error('Error loading files from localStorage:', error)
+        }
+      }
+    }
+  }, [rawContent])
+
   // Process content
-  const processedContent = ('\n'.repeat(currentSettings.emptyLinesAtStart || 5) + rawContent)
+  const contentToProcess = rawContent || 'Warten auf Regie-Verbindung...\n\nBitte starten Sie die Regie und laden Sie einen Text.'
+  const processedContent = ('\n'.repeat(currentSettings.emptyLinesAtStart || 5) + contentToProcess)
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .split('\n').map((line, index) => (
@@ -179,6 +258,16 @@ const AusspielungPage = () => {
           </div>
           
           <div className="flex items-center gap-4">
+            <div className={`text-xs px-2 py-1 rounded font-medium ${
+              connectionStatus === 'connected' 
+                ? 'bg-green-600 text-white' 
+                : connectionStatus === 'connecting'
+                ? 'bg-yellow-600 text-white'
+                : 'bg-red-600 text-white'
+            }`}>
+              {connectionStatus === 'connected' ? '🟢 Sync' :
+               connectionStatus === 'connecting' ? '🟡 Verbinde...' : '🔴 Offline'}
+            </div>
             <div className="text-sm text-gray-400">
               Position: {Math.round(scrollPosition)}px
             </div>
@@ -274,6 +363,15 @@ const AusspielungPage = () => {
         </button>
       </div>
     </div>
+  )
+}
+
+// Wrapper component with WebSocket Provider
+const AusspielungPage = () => {
+  return (
+    <NewWebSocketProvider>
+      <AusspielungPageInternal />
+    </NewWebSocketProvider>
   )
 }
 

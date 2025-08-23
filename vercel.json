@@ -17,6 +17,21 @@
     }
   ],
   "env": {
-    "VITE_WS_URL": "wss://your-websocket-server.vercel.app"
-  }
+    "VITE_WS_URL": "wss://your-websocket-server.railway.app/ws"
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    }
+  ]
 }

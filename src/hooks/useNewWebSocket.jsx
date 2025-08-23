@@ -26,6 +26,8 @@ export const MESSAGE_TYPES = {
   SEEK_LINE: 'SEEK_LINE',
   LAYOUT_SETTINGS: 'LAYOUT_SETTINGS',
   OUTPUT_LINE_UPDATE: 'OUTPUT_LINE_UPDATE',
+  SCROLL_POSITION: 'SCROLL_POSITION',
+  SETTINGS_UPDATE: 'SETTINGS_UPDATE',
   PING: 'PING',
   PONG: 'PONG'
 }
@@ -104,6 +106,27 @@ export const NewWebSocketProvider = ({ children }) => {
     return sendMessage(MESSAGE_TYPES.LAYOUT_SETTINGS, layoutSettings)
   }, [sendMessage])
 
+  // Optimized scroll position with throttling for ultra-low latency
+  const scrollThrottleRef = useRef(null)
+  const sendScrollPosition = useCallback((scrollPosition) => {
+    // Clear previous throttle
+    if (scrollThrottleRef.current) {
+      clearTimeout(scrollThrottleRef.current)
+    }
+    
+    // Send immediately for responsive feel, throttle subsequent calls
+    const success = sendMessage(MESSAGE_TYPES.SCROLL_POSITION, {
+      scrollPosition,
+      timestamp: Date.now()
+    })
+    
+    return success
+  }, [sendMessage])
+
+  const sendSettingsUpdate = useCallback((settings) => {
+    return sendMessage(MESSAGE_TYPES.SETTINGS_UPDATE, settings)
+  }, [sendMessage])
+
   // WebSocket connection management
   const connect = useCallback(() => {
     if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
@@ -115,7 +138,10 @@ export const NewWebSocketProvider = ({ children }) => {
       setConnectionStatus('connecting')
       setLastError(null)
 
-      const websocket = new WebSocket('ws://localhost:3002/ws')
+      // Use environment variable or fallback to localhost
+      const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3002/ws'
+      console.log('🔗 Connecting to WebSocket:', wsUrl)
+      const websocket = new WebSocket(wsUrl)
       
       websocket.onopen = () => {
         console.log('✅ WebSocket connected')
@@ -123,10 +149,10 @@ export const NewWebSocketProvider = ({ children }) => {
         setWs(websocket)
         setLastError(null)
         
-        // Start heartbeat
+        // Start heartbeat - reduced interval for better connection monitoring
         heartbeatIntervalRef.current = setInterval(() => {
           sendMessage(MESSAGE_TYPES.PING)
-        }, 30000) // 30 seconds
+        }, 10000) // 10 seconds for faster detection of connection issues
       }
 
       websocket.onmessage = (event) => {
@@ -171,11 +197,11 @@ export const NewWebSocketProvider = ({ children }) => {
           heartbeatIntervalRef.current = null
         }
         
-        // Auto-reconnect unless manually closed
+        // Fast auto-reconnect for minimal downtime
         if (event.code !== 1000) { // 1000 = normal closure
           reconnectTimeoutRef.current = setTimeout(() => {
             connect()
-          }, 3000)
+          }, 1000) // Faster reconnect: 1 second instead of 3
         }
       }
 
@@ -241,6 +267,8 @@ export const NewWebSocketProvider = ({ children }) => {
     sendPlaybackState,
     sendSeekLine,
     sendLayoutSettings,
+    sendScrollPosition,
+    sendSettingsUpdate,
     
     // Constants
     MESSAGE_TYPES

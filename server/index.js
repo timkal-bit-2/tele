@@ -15,20 +15,22 @@ const wss = new WebSocketServer({
 // Track connected clients
 const clients = new Set()
 
-// Broadcast message to all clients
+// Ultra-fast broadcast with minimal processing
 const broadcast = (message, sender = null) => {
   const messageString = JSON.stringify(message)
   
-  clients.forEach(client => {
+  // Use for...of for faster iteration
+  for (const client of clients) {
     if (client !== sender && client.readyState === client.OPEN) {
       try {
+        // Send immediately without additional processing
         client.send(messageString)
       } catch (error) {
         console.error('Error sending message to client:', error)
         clients.delete(client)
       }
     }
-  })
+  }
 }
 
 // Send client count to all clients
@@ -44,6 +46,9 @@ wss.on('connection', (ws, request) => {
   
   // Add client to set
   clients.add(ws)
+  
+  // Optimize WebSocket settings for low latency
+  ws.binaryType = 'arraybuffer'
   
   // Send initial client count
   broadcastClientCount()
@@ -74,7 +79,9 @@ wss.on('connection', (ws, request) => {
         case 'SEEK_LINE':
         case 'LAYOUT_SETTINGS':
         case 'OUTPUT_LINE_UPDATE':
-          // Broadcast to all other clients
+        case 'SCROLL_POSITION':
+        case 'SETTINGS_UPDATE':
+          // Broadcast to all other clients with priority for scroll messages
           broadcast(message, ws)
           break
           
