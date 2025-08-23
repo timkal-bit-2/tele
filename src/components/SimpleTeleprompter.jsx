@@ -4,7 +4,7 @@ const SimpleTeleprompter = () => {
   // Basis State
   const [text, setText] = useState('Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\nUt enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\n\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\n\nSed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam.\n\nEaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.\n\nNemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores.\n\nEos qui ratione voluptatem sequi nesciunt neque porro quisquam est, qui dolorem ipsum quia dolor sit amet.\n\nConsectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam.\n\nAliquam quaerat voluptatem ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit.\n\nLaboriosam, nisi ut aliquid ex ea commodi consequatur quis autem vel eum iure reprehenderit qui in ea.\n\nVoluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla.\n\nPariatur at vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum.\n\nDeleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident.\n\nSimilique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga.\n\nEt harum quidem rerum facilis est et expedita distinctio nam libero tempore cum soluta nobis est.\n\nEligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus omnis voluptas.\n\nAssumenda est, omnis dolor repellendus temporibus autem quibusdam et aut officiis debitis aut rerum.\n\nNecessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae itaque earum.\n\nRerum hic tenetur a sapiente delectus ut aut reiciendis voluptatibus maiores alias consequatur aut.\n\nPerferendis doloribus asperiores repellat nam cum soluta nobis est eligendi optio cumque nihil impedit.\n\nQuo minus id quod maxime placeat facere possimus omnis voluptas assumenda est omnis dolor repellendus.\n\nTemporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut voluptates.\n\nRepudiandae sint et molestiae non recusandae itaque earum rerum hic tenetur a sapiente delectus.\n\nUt aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat. 🎉')
   const [isPlaying, setIsPlaying] = useState(false)
-  const [speed, setSpeed] = useState(5)
+  const [speed, setSpeed] = useState(300)
   const [scrollPosition, setScrollPosition] = useState(0)
   const [connectionStatus, setConnectionStatus] = useState('disconnected')
   const [debugLogs, setDebugLogs] = useState([])
@@ -72,17 +72,82 @@ const SimpleTeleprompter = () => {
 
   // Send playback state updates
   useEffect(() => {
-    sendMessage('SIMPLE_PLAYBACK_STATE', { isPlaying, speed })
+    addDebugLog(`🎮 Sending playback: ${isPlaying ? 'PLAY' : 'PAUSE'} Speed: ${speed}`)
+    
+    // Bei Play-Start: aktuelle Position übertragen
+    if (isPlaying && teleprompterRef.current) {
+      const currentPos = teleprompterRef.current.scrollTop
+      sendMessage('SIMPLE_PLAYBACK_STATE', { 
+        isPlaying, 
+        speed, 
+        startPosition: currentPos // Position für nahtlosen Übergang
+      })
+      addDebugLog(`🚀 Play from position: ${Math.round(currentPos)}px`)
+    } else {
+      sendMessage('SIMPLE_PLAYBACK_STATE', { isPlaying, speed })
+    }
   }, [isPlaying, speed])
 
-  // Auto-Scroll wenn Playing
+  // Manual scroll position sync when paused
   useEffect(() => {
-    if (isPlaying) {
+    let positionSyncTimer = null
+    
+    if (!isPlaying) {
+      // Send position every 500ms when paused
+      positionSyncTimer = setInterval(() => {
+        if (teleprompterRef.current) {
+          const currentPos = teleprompterRef.current.scrollTop
+          sendMessage('SIMPLE_MANUAL_POSITION', { scrollPosition: currentPos })
+          addDebugLog(`📍 Manual pos: ${Math.round(currentPos)}px`)
+        }
+      }, 500)
+    }
+
+    return () => {
+      if (positionSyncTimer) {
+        clearInterval(positionSyncTimer)
+      }
+    }
+  }, [isPlaying])
+
+  // Berechne Scroll-Rate für Regie-Preview (identisch zum iPad)
+  const calculateScrollRate = () => {
+    if (!teleprompterRef.current || !text) return 0
+    
+    const element = teleprompterRef.current
+    const maxScroll = element.scrollHeight - element.clientHeight
+    const textLength = text.length
+    
+    if (maxScroll <= 0 || textLength <= 0) return 0
+    
+    // Speed = Zeichen pro Minute (direkt)
+    const charsPerMinute = speed // Speed ist jetzt direkt cpm (180-800)
+    const totalSeconds = textLength / charsPerMinute * 60 // Zeit in Sekunden für ganzen Text
+    const pixelsPerSecond = maxScroll / totalSeconds
+    const pixelsPerTick = pixelsPerSecond / 60 // 60fps
+    
+    return pixelsPerTick
+  }
+
+  // Regie-Preview Scroll (synchron zum iPad)
+  useEffect(() => {
+    if (isPlaying && teleprompterRef.current) {
+      const scrollRate = calculateScrollRate()
+      const totalDuration = text.length / speed * 60 // Sekunden
+      
+      addDebugLog(`👁️ Preview scroll: ${scrollRate.toFixed(2)}px/tick, ${totalDuration.toFixed(1)}s total`)
+      
       const scroll = () => {
         setScrollPosition(prev => {
-          const newPos = prev + speed * 0.1
+          const newPos = prev + scrollRate
           if (teleprompterRef.current) {
-            teleprompterRef.current.scrollTop = newPos
+            const element = teleprompterRef.current
+            const maxScroll = element.scrollHeight - element.clientHeight
+            
+            // Scroll nur wenn wir noch nicht am Ende sind
+            if (newPos < maxScroll) {
+              element.scrollTop = newPos
+            }
           }
           return newPos
         })
@@ -90,6 +155,7 @@ const SimpleTeleprompter = () => {
       }
       animationRef.current = requestAnimationFrame(scroll)
     } else {
+      addDebugLog('👁️ Preview scroll stopped')
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current)
       }
@@ -100,7 +166,7 @@ const SimpleTeleprompter = () => {
         cancelAnimationFrame(animationRef.current)
       }
     }
-  }, [isPlaying, speed])
+  }, [isPlaying, speed, text])
 
   // Manueller Scroll
   const handleWheel = (e) => {
@@ -157,20 +223,21 @@ const SimpleTeleprompter = () => {
           </button>
           
           <div className="flex items-center gap-2">
-            <label className="text-sm">Speed:</label>
+            <label className="text-sm">Reading Speed:</label>
             <input
               type="range"
-              min="1"
-              max="20"
+              min="180"
+              max="1000"
+              step="20"
               value={speed}
               onChange={(e) => setSpeed(Number(e.target.value))}
-              className="w-20"
+              className="w-24"
             />
-            <span className="text-sm w-8">{speed}</span>
+            <span className="text-sm w-20">{speed} cpm</span>
           </div>
 
           <div className="text-sm text-gray-400">
-            Pos: {Math.round(scrollPosition)}px
+            Total: {Math.round(text.length / speed * 60)}s | {text.length} chars
           </div>
         </div>
 
