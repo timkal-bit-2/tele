@@ -105,8 +105,42 @@ const StartPage = () => {
           </div>
         </div>
 
-        {/* Main Buttons */}
-        <div className="grid md:grid-cols-3 gap-6">
+        {/* Simple Teleprompter - Prominent */}
+        <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl p-8 border-2 border-blue-400 hover:border-blue-300 transition-all duration-300 hover:scale-105 shadow-2xl">
+          <div className="space-y-4">
+            <div className="text-4xl">✨</div>
+            <h2 className="text-2xl font-bold text-white">Simple Teleprompter</h2>
+            <p className="text-blue-100 text-sm leading-relaxed">
+              <strong>EINFACH & ZUVERLÄSSIG!</strong> Minimale Lösung mit allen wichtigen Features.
+            </p>
+            <ul className="text-xs text-blue-200 space-y-1 text-left">
+              <li>• Character-based Speed (1-20 = 100-2000 cpm)</li>
+              <li>• Live Layout Controls (Font, Margin, Flip)</li>
+              <li>• Manual Scroll Sync when Paused</li>
+              <li>• Autonomous iPad Scrolling</li>
+              <li>• WebSocket via Render.com</li>
+            </ul>
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => navigate('/simple')}
+                className="flex-1 px-4 py-3 bg-white text-blue-600 font-bold rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                🎛️ Regie
+              </button>
+              <button
+                onClick={() => navigate('/simple-ausspielung')}
+                className="flex-1 px-4 py-3 bg-blue-800 text-white font-bold rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                📺 iPad
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Legacy/Advanced Options */}
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-400 text-center">Legacy/Advanced Versionen</h3>
+          <div className="grid md:grid-cols-3 gap-6">
           {/* Regie v1 Button */}
           <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700 hover:border-blue-500 transition-all duration-300 hover:scale-105">
             <div className="space-y-4">
@@ -178,6 +212,7 @@ const StartPage = () => {
                 </p>
               )}
             </div>
+          </div>
           </div>
         </div>
 
