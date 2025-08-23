@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 // Teleprompter Preview Component
 const TeleprompterPreview = ({ 
@@ -14,7 +15,9 @@ const TeleprompterPreview = ({
   handleLineMouseDown,
   showControls = true,
   isSmall = false,
-  className = ""
+  className = "",
+  onScrollPositionChange = null, // Callback for scroll position changes
+  enableMirroring = false // New parameter to control mirroring
 }) => {
   const processedContent = ('\n'.repeat(settings.emptyLinesAtStart) + rawContent)
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
@@ -41,7 +44,14 @@ const TeleprompterPreview = ({
       <div 
         ref={isSmall ? null : previewRef}
         className="flex-1 min-h-0 overflow-hidden bg-black relative"
-        onWheel={isSmall ? null : handleWheel}
+        onWheel={isSmall ? (e) => {
+          e.preventDefault()
+          const delta = e.deltaY
+          const newPosition = Math.max(0, Math.min(scrollPosition + delta, 50000))
+          if (onScrollPositionChange) {
+            onScrollPositionChange(newPosition)
+          }
+        } : handleWheel}
         onMouseDown={isSmall ? null : handleMouseDown}
         style={{
           cursor: isSmall ? 'default' : (playbackState.isScrolling ? 'default' : (isDraggingText ? 'grabbing' : 'grab')),
@@ -108,10 +118,8 @@ const TeleprompterPreview = ({
             whiteSpace: 'pre-wrap',
             wordWrap: 'break-word',
             transform: isSmall 
-              ? `translateY(${(-scrollPosition - 180) * 0.25}px) 
-                 scaleX(${settings.mirrorHorizontal ? -1 : 1}) 
-                 scaleY(${settings.mirrorVertical ? -1 : 1})`
-              : `translateY(${-scrollPosition - 180}px)`,
+              ? `translateY(${(-scrollPosition - 180) * 0.25}px)${enableMirroring ? ` scaleX(${settings.mirrorHorizontal ? -1 : 1}) scaleY(${settings.mirrorVertical ? -1 : 1})` : ''}`
+              : `translateY(${-scrollPosition - 180}px)${enableMirroring ? ` scaleX(${settings.mirrorHorizontal ? -1 : 1}) scaleY(${settings.mirrorVertical ? -1 : 1})` : ''}`,
             transition: playbackState.isScrolling ? 'none' : 'transform 0.3s ease',
             width: isSmall ? '200px' : '800px',
             minWidth: isSmall ? '200px' : '800px',
@@ -188,6 +196,7 @@ const ResizablePanel = ({ children, defaultSize = 300, minSize = 200, maxSize = 
 const TeleprompterRegie = ({ onReset }) => {
   console.log('TeleprompterRegie rendering...')
   
+  const navigate = useNavigate()
   const [rawContent, setRawContent] = useState('Dies ist ein Test-Text für die Teleprompter-Vorschau. Wenn du das siehst, funktioniert die Anzeige.')
   const [files, setFiles] = useState([])
   const [activeFileId, setActiveFileId] = useState(null)
@@ -209,8 +218,39 @@ const TeleprompterRegie = ({ onReset }) => {
   const [scrollPosition, setScrollPosition] = useState(0)  // Always start at 0 for mouse scroll
   const [isDraggingLine, setIsDraggingLine] = useState(false)
   const [isDraggingText, setIsDraggingText] = useState(false)
+  const [presets, setPresets] = useState(() => {
+    // Lade Presets aus localStorage
+    try {
+      const saved = localStorage.getItem('teleprompter-presets')
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
+  const [presetName, setPresetName] = useState('')
+  const [editingPresetIndex, setEditingPresetIndex] = useState(null)
   const intervalRef = useRef(null)
   const previewRef = useRef(null)
+
+  // Sync scroll position to localStorage for Ausspielung page
+  useEffect(() => {
+    localStorage.setItem('mainScrollPosition', scrollPosition.toString())
+  }, [scrollPosition])
+
+  // Listen for scroll position updates from Ausspielung page
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      const ausspielungPosition = localStorage.getItem('ausspielungScrollPosition')
+      if (ausspielungPosition !== null) {
+        const position = parseFloat(ausspielungPosition)
+        if (Math.abs(position - scrollPosition) > 1) {
+          setScrollPosition(position)
+        }
+      }
+    }, 100)
+
+    return () => clearInterval(pollInterval)
+  }, [scrollPosition])
 
   // Load saved files from localStorage
   useEffect(() => {
@@ -288,15 +328,27 @@ const TeleprompterRegie = ({ onReset }) => {
     document.body.removeChild(element)
   }
 
-  // Auto-scroll functionality
+  // Auto-scroll functionality (Memory-optimiert)
   useEffect(() => {
     if (playbackState.isScrolling) {
       intervalRef.current = setInterval(() => {
-        setScrollPosition(prev => prev + (settings.speed * 10))
+        setScrollPosition(prev => {
+          const newPos = prev + (settings.speed * 10)
+          // Verhindere endlose Updates bei sehr hohen Werten
+          return Math.min(newPos, 50000) // Max 50k Pixel
+        })
       }, 50)
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
+        intervalRef.current = null // Explizit null setzen
+      }
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null // Cleanup
       }
     }
   }, [playbackState.isScrolling, settings.speed])
@@ -305,53 +357,13 @@ const TeleprompterRegie = ({ onReset }) => {
     setPlaybackState(prev => ({ ...prev, isScrolling: !prev.isScrolling }))
   }
 
-  const scrollToTop = () => {
-    // Save current settings
-    const originalSpeed = settings.speed
-    const originalIsScrolling = playbackState.isScrolling
-    
-    // Set max speed and start scrolling up
-    updateSetting('speed', 8.0) // Max speed
-    setPlaybackState(prev => ({ ...prev, isScrolling: true }))
-    
-    // Temporarily reverse scroll direction by making speed negative
-    const originalInterval = intervalRef.current
-    if (originalInterval) clearInterval(originalInterval)
-    
-    // Scroll up with max speed for 2 seconds
-    intervalRef.current = setInterval(() => {
-      setScrollPosition(prev => Math.max(-300, prev - (8.0 * 10))) // Scroll up
-    }, 50)
-    
-    // After 2 seconds, restore original settings
-    setTimeout(() => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-      }
-      updateSetting('speed', originalSpeed) // Restore original speed
-      setPlaybackState(prev => ({ ...prev, isScrolling: originalIsScrolling })) // Restore original state
-      
-      // Restart normal auto-scroll if it was running
-      if (originalIsScrolling) {
-        intervalRef.current = setInterval(() => {
-          setScrollPosition(prev => prev + (originalSpeed * 10))
-        }, 50)
-      }
-    }, 2000) // 2 seconds
-  }
-
-  const scrollToBottom = () => {
-    if (previewRef.current) {
-      const previewHeight = previewRef.current.clientHeight
-      const contentHeight = previewRef.current.scrollHeight
-      const maxScrollPosition = Math.max(0, contentHeight - previewHeight + 200) // +200px extra padding
-      setScrollPosition(maxScrollPosition)
-    }
-    setPlaybackState(prev => ({ ...prev, isScrolling: false }))
-  }
-
   const updateSetting = (key, value) => {
-    setSettings(prev => ({ ...prev, [key]: value }))
+    const newSettings = { ...settings, [key]: value }
+    setSettings(newSettings)
+    
+    // Save to localStorage for Ausspielung page sync
+    localStorage.setItem('teleprompter-settings', JSON.stringify(newSettings))
+    
     if (key === 'speed') {
       setPlaybackState(prev => ({ ...prev, speed: value }))
     }
@@ -368,7 +380,7 @@ const TeleprompterRegie = ({ onReset }) => {
     setScrollPosition(prev => Math.max(-300, prev + delta))  // Limit upward scroll to -300px
   }
 
-  // Drag scrolling
+  // Drag scrolling (Memory-optimiert)
   const handleMouseDown = (e) => {
     if (playbackState.isScrolling) return
     
@@ -379,20 +391,24 @@ const TeleprompterRegie = ({ onReset }) => {
     const handleMouseMove = (e) => {
       const deltaY = e.clientY - startY
       const newScrollPos = startScrollPos - deltaY * 2
-      setScrollPosition(Math.max(-300, newScrollPos))  // Limit upward scroll to -300px
+      setScrollPosition(Math.max(-300, Math.min(50000, newScrollPos))) // Begrenzt und verhindert Memory-Leaks
     }
     
     const handleMouseUp = () => {
       setIsDraggingText(false)
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('mousemove', handleMouseMove, { passive: false })
+      document.removeEventListener('mouseup', handleMouseUp, { passive: false })
     }
     
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
+    // Cleanup bestehende Listeners vor dem Hinzufügen neuer
+    document.removeEventListener('mousemove', handleMouseMove, { passive: false })
+    document.removeEventListener('mouseup', handleMouseUp, { passive: false })
+    
+    document.addEventListener('mousemove', handleMouseMove, { passive: false })
+    document.addEventListener('mouseup', handleMouseUp, { passive: false })
   }
 
-  // Reading line drag
+  // Reading line drag (Memory-optimiert)
   const handleLineMouseDown = (e) => {
     e.stopPropagation()
     setIsDraggingLine(true)
@@ -408,16 +424,71 @@ const TeleprompterRegie = ({ onReset }) => {
     
     const handleMouseUp = () => {
       setIsDraggingLine(false)
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('mousemove', handleMouseMove, { passive: false })
+      document.removeEventListener('mouseup', handleMouseUp, { passive: false })
     }
     
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
+    // Cleanup bestehende Listeners
+    document.removeEventListener('mousemove', handleMouseMove, { passive: false })
+    document.removeEventListener('mouseup', handleMouseUp, { passive: false })
+    
+    document.addEventListener('mousemove', handleMouseMove, { passive: false })
+    document.addEventListener('mouseup', handleMouseUp, { passive: false })
+  }
+
+  // Speichern eines neuen Presets
+  const savePreset = () => {
+    if (!presetName.trim()) return
+    const newPreset = {
+      name: presetName.trim(),
+      settings: { ...settings }
+    }
+    const updated = [...presets.slice(0, 2), newPreset] // max 3 Presets
+    setPresets(updated)
+    localStorage.setItem('teleprompter-presets', JSON.stringify(updated))
+    setPresetName('')
+    setEditingPresetIndex(null)
+  }
+
+  // Laden eines Presets
+  const loadPreset = (idx) => {
+    setSettings({ ...presets[idx].settings })
+  }
+
+  // Löschen eines Presets
+  const deletePreset = (idx) => {
+    const updated = presets.filter((_, i) => i !== idx)
+    setPresets(updated)
+    localStorage.setItem('teleprompter-presets', JSON.stringify(updated))
+  }
+
+  // Umbenennen eines Presets
+  const renamePreset = (idx, newName) => {
+    const updated = presets.map((p, i) => i === idx ? { ...p, name: newName } : p)
+    setPresets(updated)
+    localStorage.setItem('teleprompter-presets', JSON.stringify(updated))
   }
 
   return (
-    <div className="h-screen bg-gray-950 text-white flex overflow-hidden">
+    <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
+      {/* Top Header */}
+      <div className="bg-gray-900 px-4 py-2 border-b border-gray-700 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => navigate('/')}
+            className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white text-sm transition-colors"
+          >
+            🏠 Startseite
+          </button>
+          <h1 className="text-lg font-medium text-white">🎛️ Teleprompter Regie</h1>
+        </div>
+        <div className="text-xs text-gray-500">
+          Professionelle Teleprompter-Steuerung
+        </div>
+      </div>
+      
+      {/* Main Content */}
+      <div className="flex-1 flex overflow-hidden">
       <ResizablePanel defaultSize={350} minSize={280} maxSize={500}>
         {/* Left Panel - Settings and Controls */}
         <div className="h-full flex flex-col">
@@ -437,26 +508,33 @@ const TeleprompterRegie = ({ onReset }) => {
                   >
                     {playbackState.isScrolling ? '⏸️ Stopp' : '▶️ Start'}
                   </button>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={scrollToTop}
-                      className="px-3 py-2 text-xs bg-gray-600 hover:bg-gray-700 rounded transition-colors"
-                    >
-                      ⬆️ Anfang
-                    </button>
-                    <button
-                      onClick={scrollToBottom}
-                      className="px-3 py-2 text-xs bg-gray-600 hover:bg-gray-700 rounded transition-colors"
-                    >
-                      ⬇️ Ende
-                    </button>
-                  </div>
                 </div>
               </div>
 
               {/* Settings */}
               <div className="mb-6">
-                <h3 className="text-sm font-medium text-gray-300 mb-3">⚙️ Einstellungen</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-medium text-gray-300">⚙️ Einstellungen</h3>
+                  <button
+                    onClick={() => {
+                      setSettings({
+                        fontSize: 60,
+                        lineHeight: 1.2,
+                        speed: 2.0,
+                        padding: 20,
+                        readingLinePosition: 50,
+                        showReadingLine: true,
+                        mirrorHorizontal: false,
+                        mirrorVertical: false,
+                        emptyLinesAtStart: 2
+                      })
+                    }}
+                    className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
+                    title="Standardeinstellungen wiederherstellen"
+                  >
+                    Reset
+                  </button>
+                </div>
                 <div className="space-y-3">
                   {/* Font Size */}
                   <div className="mb-3">
@@ -567,6 +645,61 @@ const TeleprompterRegie = ({ onReset }) => {
                 </div>
               </div>
 
+              {/* Einstellungen-Presets */}
+              <div className="mb-4">
+                <h4 className="text-xs text-gray-400 mb-2">Einstellungen-Presets</h4>
+                <div className="space-y-2">
+                  {presets.map((preset, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <button
+                        className="px-2 py-1 text-xs bg-blue-700 hover:bg-blue-800 text-white rounded"
+                        onClick={() => loadPreset(idx)}
+                      >
+                        Laden
+                      </button>
+                      {editingPresetIndex === idx ? (
+                        <input
+                          className="px-2 py-1 text-xs rounded bg-gray-700 text-white border border-gray-600"
+                          value={preset.name}
+                          onChange={e => renamePreset(idx, e.target.value)}
+                          onBlur={() => setEditingPresetIndex(null)}
+                          autoFocus
+                        />
+                      ) : (
+                        <span
+                          className="text-xs text-gray-200 cursor-pointer hover:underline"
+                          onClick={() => setEditingPresetIndex(idx)}
+                        >
+                          {preset.name}
+                        </span>
+                      )}
+                      <button
+                        className="px-2 py-1 text-xs bg-red-700 hover:bg-red-800 text-white rounded"
+                        onClick={() => deletePreset(idx)}
+                      >
+                        Löschen
+                      </button>
+                    </div>
+                  ))}
+                  {presets.length < 3 && (
+                    <div className="flex gap-2 mt-2">
+                      <input
+                        className="px-2 py-1 text-xs rounded bg-gray-700 text-white border border-gray-600"
+                        value={presetName}
+                        onChange={e => setPresetName(e.target.value)}
+                        placeholder="Preset-Name"
+                      />
+                      <button
+                        className="px-2 py-1 text-xs bg-green-700 hover:bg-green-800 text-white rounded"
+                        onClick={savePreset}
+                      >
+                        Speichern
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Small Preview Window */}
               <div className="border-t border-gray-700 p-3">
                 <h4 className="text-xs text-gray-400 mb-2">📡 Ausspielung</h4>
@@ -584,8 +717,24 @@ const TeleprompterRegie = ({ onReset }) => {
                     handleLineMouseDown={null}
                     showControls={false}
                     isSmall={true}
+                    onScrollPositionChange={setScrollPosition}
+                    enableMirroring={true}
                   />
                 </div>
+                
+                {/* Ausspielung öffnen Button */}
+                <button
+                  onClick={() => navigate('/ausspielung', { 
+                    state: { 
+                      rawContent, 
+                      settings, 
+                      initialScrollPosition: scrollPosition 
+                    } 
+                  })}
+                  className="w-full px-3 py-2 mb-3 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
+                >
+                  📺 Ausspielung öffnen
+                </button>
                 
                 {/* Mirror Controls */}
                 <div className="space-y-2">
@@ -631,6 +780,7 @@ const TeleprompterRegie = ({ onReset }) => {
             handleLineMouseDown={handleLineMouseDown}
             showControls={true}
             isSmall={false}
+            enableMirroring={false}
           />
         </div>
 
@@ -701,12 +851,9 @@ const TeleprompterRegie = ({ onReset }) => {
           </div>
         </div>
       </div>
+      </div>
     </div>
   )
 }
 
-function App() {
-  return <TeleprompterRegie />
-}
-
-export default App
+export default TeleprompterRegie

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-  "dev": "vite --host",
+    "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
     "server": "node server/index.js",
@@ -12,10 +12,11 @@
     "health": "curl http://localhost:3001/health"
   },
   "dependencies": {
+    "iconv-lite": "^0.6.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "ws": "^8.18.0",
-    "iconv-lite": "^0.6.3"
+    "react-router-dom": "^7.8.2",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

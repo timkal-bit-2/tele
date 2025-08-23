@@ -1,0 +1,280 @@
+import { useState, useEffect, useRef } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+
+const AusspielungPage = () => {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [scrollPosition, setScrollPosition] = useState(0)
+  const [currentSettings, setCurrentSettings] = useState({})
+  const previewRef = useRef(null)
+
+  // Get data from location state
+  const { rawContent = '', settings = {}, initialScrollPosition = 0 } = location.state || {}
+
+  // Initialize with settings from location state
+  useEffect(() => {
+    setCurrentSettings(settings)
+  }, [settings])
+
+  // Debug log to check settings
+  useEffect(() => {
+    console.log('AusspielungPage settings:', currentSettings)
+  }, [currentSettings])
+
+  // Sync settings from localStorage (for real-time updates)
+  useEffect(() => {
+    const pollInterval = setInterval(() => {
+      const storedSettings = localStorage.getItem('teleprompter-settings')
+      if (storedSettings) {
+        try {
+          const parsedSettings = JSON.parse(storedSettings)
+          setCurrentSettings(parsedSettings)
+        } catch (error) {
+          console.error('Error parsing settings:', error)
+        }
+      }
+    }, 500)
+
+    return () => clearInterval(pollInterval)
+  }, [])
+
+  // Initialize scroll position
+  useEffect(() => {
+    setScrollPosition(initialScrollPosition)
+  }, [initialScrollPosition])
+
+  // Sync scroll position back to main app via localStorage
+  useEffect(() => {
+    localStorage.setItem('ausspielungScrollPosition', scrollPosition.toString())
+  }, [scrollPosition])
+
+  // Listen for scroll position updates from main app
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'mainScrollPosition') {
+        const newPosition = parseFloat(e.newValue) || 0
+        setScrollPosition(newPosition)
+      }
+    }
+
+    window.addEventListener('storage', handleStorageChange)
+    
+    // Also poll for changes (fallback for same-origin)
+    const pollInterval = setInterval(() => {
+      const mainPosition = localStorage.getItem('mainScrollPosition')
+      if (mainPosition !== null) {
+        const position = parseFloat(mainPosition)
+        if (Math.abs(position - scrollPosition) > 1) {
+          setScrollPosition(position)
+        }
+      }
+    }, 100)
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+      clearInterval(pollInterval)
+    }
+  }, [scrollPosition])
+
+  // Handle wheel scrolling
+  const handleWheel = (e) => {
+    e.preventDefault()
+    const delta = e.deltaY
+    setScrollPosition(prev => Math.max(0, Math.min(prev + delta, 50000)))
+  }
+
+  // Handle touch/mouse dragging
+  const [isDragging, setIsDragging] = useState(false)
+  const [dragStart, setDragStart] = useState({ y: 0, scrollPosition: 0 })
+
+  const handleMouseDown = (e) => {
+    setIsDragging(true)
+    setDragStart({
+      y: e.clientY,
+      scrollPosition: scrollPosition
+    })
+  }
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isDragging) return
+      
+      const deltaY = e.clientY - dragStart.y
+      const newPosition = Math.max(0, Math.min(dragStart.scrollPosition - deltaY, 50000))
+      setScrollPosition(newPosition)
+    }
+
+    const handleMouseUp = () => {
+      setIsDragging(false)
+    }
+
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isDragging, dragStart])
+
+  // Fullscreen handling
+  const toggleFullscreen = async () => {
+    if (!document.fullscreenElement) {
+      try {
+        await document.documentElement.requestFullscreen()
+        setIsFullscreen(true)
+      } catch (err) {
+        console.log('Fullscreen not supported:', err)
+      }
+    } else {
+      try {
+        await document.exitFullscreen()
+        setIsFullscreen(false)
+      } catch (err) {
+        console.log('Exit fullscreen failed:', err)
+      }
+    }
+  }
+
+  // Listen for fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
+
+  // Process content
+  const processedContent = ('\n'.repeat(currentSettings.emptyLinesAtStart || 5) + rawContent)
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .split('\n').map((line, index) => (
+      <div key={index} dangerouslySetInnerHTML={{ __html: line || '&nbsp;' }} />
+    ))
+
+  return (
+    <div className="h-screen bg-black flex flex-col">
+      {/* Header with controls - hidden in fullscreen */}
+      {!isFullscreen && (
+        <div className="bg-gray-900 px-4 py-3 flex justify-between items-center flex-shrink-0">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => navigate('/')}
+              className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-white text-sm transition-colors"
+            >
+              🏠 Zur Startseite
+            </button>
+            <button
+              onClick={() => navigate('/regie')}
+              className="px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded text-white text-sm transition-colors"
+            >
+              🎛️ Zur Regie
+            </button>
+            <h1 className="text-white font-medium">📺 Ausspielung</h1>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            <div className="text-sm text-gray-400">
+              Position: {Math.round(scrollPosition)}px
+            </div>
+            <button
+              onClick={toggleFullscreen}
+              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm transition-colors"
+            >
+              {isFullscreen ? '🔲 Vollbild verlassen' : '⛶ Vollbild'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Discrete fullscreen exit button - only visible in fullscreen */}
+      {isFullscreen && (
+        <button
+          onClick={toggleFullscreen}
+          className="absolute top-4 right-4 z-30 px-2 py-1 bg-gray-800 bg-opacity-60 hover:bg-opacity-80 rounded text-gray-300 text-xs transition-all opacity-70 hover:opacity-100"
+          style={{ fontSize: '12px' }}
+        >
+          ✕ Vollbild verlassen
+        </button>
+      )}
+
+      {/* Main teleprompter display */}
+      <div 
+        ref={previewRef}
+        className="flex-1 overflow-hidden bg-black relative"
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        style={{
+          cursor: isDragging ? 'grabbing' : 'grab',
+          userSelect: 'none'
+        }}
+      >
+        {/* Speed Display */}
+        <div style={{
+          position: 'absolute',
+          top: isFullscreen ? '4px' : '20px',
+          right: isFullscreen ? '4px' : '20px',
+          backgroundColor: isFullscreen ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.8)',
+          color: isFullscreen ? 'rgba(255, 255, 255, 0.6)' : 'white',
+          padding: isFullscreen ? '6px 10px' : '12px 16px',
+          borderRadius: '8px',
+          fontSize: isFullscreen ? '12px' : '16px',
+          fontWeight: 'bold',
+          zIndex: 20,
+          border: isFullscreen ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(255, 255, 255, 0.2)',
+          opacity: isFullscreen ? 0.7 : 1,
+          transition: 'all 0.3s ease'
+        }}>
+          Speed: {((currentSettings.speed || 0.5) * 10).toFixed(1)}
+        </div>
+        
+        <div className="h-full flex items-start justify-center overflow-auto">
+          <div style={{
+            fontFamily: 'system-ui, sans-serif',
+            fontSize: `${currentSettings.fontSize || 48}px`,
+            lineHeight: currentSettings.lineHeight || 1.4,
+            color: 'white',
+            paddingLeft: `${currentSettings.padding || 100}px`,
+            paddingRight: `${currentSettings.padding || 100}px`,
+            paddingTop: '40px',
+            paddingBottom: '40px',
+            whiteSpace: 'pre-wrap',
+            wordWrap: 'break-word',
+            transform: `translateY(${-scrollPosition - 180}px) 
+                       scaleX(${currentSettings.mirrorHorizontal ? -1 : 1}) 
+                       scaleY(${currentSettings.mirrorVertical ? -1 : 1})`,
+            transition: 'none',
+            width: '1000px',
+            minWidth: '1000px',
+            textAlign: 'left'
+          }}>
+            {processedContent}
+          </div>
+        </div>
+      </div>
+
+      {/* Touch controls for mobile */}
+      <div className="md:hidden bg-gray-900 px-4 py-3 flex justify-center gap-4">
+        <button
+          onTouchStart={() => setScrollPosition(prev => Math.max(0, prev - 50))}
+          className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded text-white text-lg"
+        >
+          ⬆️
+        </button>
+        <button
+          onTouchStart={() => setScrollPosition(prev => Math.min(prev + 50, 50000))}
+          className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded text-white text-lg"
+        >
+          ⬇️
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export default AusspielungPage
