@@ -33,6 +33,10 @@ const StartPage = () => {
   const openRegie = () => {
     navigate('/regie')
   }
+  
+  const openRegieV2 = () => {
+    navigate('/regie-v2')
+  }
 
   const openAusspielung = () => {
     // Get current content and settings for direct ausspielung access
@@ -102,53 +106,75 @@ const StartPage = () => {
         </div>
 
         {/* Main Buttons */}
-        <div className="grid md:grid-cols-2 gap-8">
-          {/* Regie Button */}
-          <div className="bg-gray-800 rounded-2xl p-8 border border-gray-700 hover:border-blue-500 transition-all duration-300 hover:scale-105">
-            <div className="space-y-6">
-              <div className="text-4xl">🎛️</div>
-              <h2 className="text-2xl font-semibold text-white">Regie</h2>
-              <p className="text-gray-400 text-sm leading-relaxed">
-                Vollständige Kontrolle über den Teleprompter. Text bearbeiten, Geschwindigkeit anpassen, Einstellungen konfigurieren.
+        <div className="grid md:grid-cols-3 gap-6">
+          {/* Regie v1 Button */}
+          <div className="bg-gray-800 rounded-2xl p-6 border border-gray-700 hover:border-blue-500 transition-all duration-300 hover:scale-105">
+            <div className="space-y-4">
+              <div className="text-3xl">🎛️</div>
+              <h2 className="text-lg font-semibold text-white">Regie v1</h2>
+              <p className="text-gray-400 text-xs leading-relaxed">
+                Klassische Regie mit Live-Vorschau und localStorage-Sync.
               </p>
               <ul className="text-xs text-gray-500 space-y-1 text-left">
-                <li>• Text-Editor mit Datei-Management</li>
-                <li>• Geschwindigkeits- und Formatierungskontrollen</li>
-                <li>• Live-Vorschau mit Leselinie</li>
-                <li>• Spiegelungseinstellungen</li>
+                <li>• Live-Vorschau</li>
+                <li>• Super Light Modus</li>
+                <li>• localStorage Sync</li>
               </ul>
               <button
                 onClick={openRegie}
-                className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+                className="w-full px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white text-sm rounded-lg transition-colors"
               >
-                🎛️ Regie öffnen
+                🎛️ Regie v1 (Legacy)
+              </button>
+            </div>
+          </div>
+          
+          {/* Regie v2 Button */}
+          <div className="bg-gray-800 rounded-2xl p-6 border border-purple-500 hover:border-purple-400 transition-all duration-300 hover:scale-105 ring-2 ring-purple-500/20">
+            <div className="space-y-4">
+              <div className="text-3xl">🚀</div>
+              <h2 className="text-lg font-semibold text-white">Regie v2.0</h2>
+              <p className="text-purple-400 text-xs leading-relaxed">
+                <strong>NEW!</strong> iPad-authoritative mit Ghost Simulation. Maximale Performance.
+              </p>
+              <ul className="text-xs text-gray-500 space-y-1 text-left">
+                <li>• Ghost Simulation</li>
+                <li>• Line-based Protocol</li>
+                <li>• Ultra-Low Latency</li>
+                <li>• Super Light Mode</li>
+              </ul>
+              <button
+                onClick={openRegieV2}
+                className="w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm rounded-lg transition-colors"
+              >
+                🚀 Regie v2.0 (NEW)
               </button>
             </div>
           </div>
 
           {/* Ausspielung Button */}
-          <div className="bg-gray-800 rounded-2xl p-8 border border-gray-700 hover:border-green-500 transition-all duration-300 hover:scale-105">
-            <div className="space-y-6">
-              <div className="text-4xl">📺</div>
-              <h2 className="text-2xl font-semibold text-white">Ausspielung</h2>
-              <p className="text-gray-400 text-sm leading-relaxed">
-                Direkt zur Vollbild-Ausspielung. Perfekt für die finale Präsentation ohne Ablenkungen.
+          <div className="bg-gray-800 rounded-2xl p-6 border border-green-500 hover:border-green-400 transition-all duration-300 hover:scale-105">
+            <div className="space-y-4">
+              <div className="text-3xl">📺</div>
+              <h2 className="text-lg font-semibold text-white">iPad Ausspielung</h2>
+              <p className="text-green-400 text-xs leading-relaxed">
+                <strong>v2.0!</strong> Authoritative iPad mit 60fps rAF-Loop.
               </p>
               <ul className="text-xs text-gray-500 space-y-1 text-left">
-                <li>• Vollbild-Modus für maximale Sichtbarkeit</li>
-                <li>• Saubere Darstellung ohne Steuerelemente</li>
-                <li>• Touch- und Scroll-Unterstützung</li>
-                <li>• Automatische Spiegelung</li>
+                <li>• iPad = Source of Truth</li>
+                <li>• 60fps Performance</li>
+                <li>• Touch Controls</li>
+                <li>• Keyframe Sync</li>
               </ul>
               <button
                 onClick={openAusspielung}
-                className="w-full px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors"
+                className="w-full px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded-lg transition-colors"
               >
-                📺 Ausspielung öffnen
+                📺 iPad Ausspielung v2.0
               </button>
               {!hasContent && (
                 <p className="text-xs text-gray-500 mt-2">
-                  💡 Startet mit Demo-Text, laden Sie Inhalte in der Regie
+                  💡 Startet mit Demo-Text
                 </p>
               )}
             </div>

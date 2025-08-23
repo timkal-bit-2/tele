@@ -1,48 +1,208 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { NewWebSocketProvider, useNewWebSocket } from '../hooks/useNewWebSocket.jsx'
-import { optimizeScrollAnimation, getOptimizedSettings, detectFreeTierHosting } from '../utils/performanceOptimizer.js'
+import { useTeleprompterClient } from '../hooks/useTeleprompterClient.js'
+import { useIpadScrollEngine } from '../hooks/useIpadScrollEngine.js'
+import { MESSAGE_TYPES, STATES } from '../types/teleprompterProtocol.js'
+import { calculateTextHash } from '../utils/lineCalculator.js'
 
 const AusspielungPageInternal = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [scrollPosition, setScrollPosition] = useState(0)
-  const [currentSettings, setCurrentSettings] = useState({})
-  const [rawContent, setRawContent] = useState('')
-  const previewRef = useRef(null)
+  const [hasUserInteracted, setHasUserInteracted] = useState(false)
+  const containerRef = useRef(null)
   
-  // WebSocket connection
-  const {
-    connectionStatus,
-    isConnected,
-    sendScrollPosition,
-    onMessage,
-    MESSAGE_TYPES
-  } = useNewWebSocket()
+  // Initialize teleprompter client
+  const teleprompterClient = useTeleprompterClient(true) // isIpad = true
   
-  // Performance optimization for free tier hosting
-  const hostingInfo = detectFreeTierHosting()
-  const perfSettings = getOptimizedSettings()
-  const [performanceWarning, setPerformanceWarning] = useState(false)
-
-  // Get data from location state
+  // Initialize iPad scroll engine
+  const scrollEngine = useIpadScrollEngine(teleprompterClient)
+  
+  // Get initial data from location state
   const locationData = location.state || {}
   const initialContent = locationData.rawContent || ''
   const initialSettings = locationData.settings || {}
-  const initialScrollPosition = locationData.initialScrollPosition || 0
-
-  // Initialize with data from location state
+  
+  // Initialize with content if provided
   useEffect(() => {
-    setCurrentSettings(initialSettings)
-    setRawContent(initialContent)
-    setScrollPosition(initialScrollPosition)
-  }, [initialSettings, initialContent, initialScrollPosition])
+    if (initialContent && teleprompterClient.isConnected) {
+      const hash = calculateTextHash(initialContent)
+      const version = Date.now() // Simple versioning
+      
+      scrollEngine.loadScript(initialContent, version, hash)
+      
+      if (Object.keys(initialSettings).length > 0) {
+        scrollEngine.updateParams({
+          speed: (initialSettings.speed || 0.2) * 300, // Convert to lines/min
+          fontSize: initialSettings.fontSize || 48,
+          lineHeight: initialSettings.lineHeight || 1.4,
+          mirror: {
+            horizontal: initialSettings.mirrorHorizontal || false,
+            vertical: initialSettings.mirrorVertical || false
+          },
+          margins: initialSettings.padding || 20
+        })
+      }
+    }
+  }, [initialContent, initialSettings, teleprompterClient.isConnected, scrollEngine])
 
-  // Debug log to check settings
+  // Set up message handlers for new protocol
   useEffect(() => {
-    console.log('AusspielungPage settings:', currentSettings)
-  }, [currentSettings])
+    const cleanupFunctions = []
+    
+    // Handle LOAD_SCRIPT from laptop
+    cleanupFunctions.push(
+      teleprompterClient.onMessage(MESSAGE_TYPES.LOAD_SCRIPT, (data) => {
+        console.log('📜 Received LOAD_SCRIPT')
+        scrollEngine.loadScript(data.content, data.scriptVersion, data.textHash)
+        teleprompterClient.sendMessage({
+          type: MESSAGE_TYPES.ACK,
+          data: { originalSeq: data.seq, scriptVersion: data.scriptVersion }
+        })
+      })
+    )
+    
+    // Handle SET_PARAMS from laptop
+    cleanupFunctions.push(
+      teleprompterClient.onMessage(MESSAGE_TYPES.SET_PARAMS, (data) => {
+        console.log('⚙️ Received SET_PARAMS')
+        scrollEngine.updateParams(data)
+        teleprompterClient.sendMessage({
+          type: MESSAGE_TYPES.ACK,
+          data: { originalSeq: data.seq, scriptVersion: data.scriptVersion }
+        })
+      })
+    )
+    
+    // Handle PLAY command
+    cleanupFunctions.push(
+      teleprompterClient.onMessage(MESSAGE_TYPES.PLAY, (data) => {
+        console.log('▶️ Received PLAY')
+        scrollEngine.play(data.t0)
+        teleprompterClient.sendMessage({
+          type: MESSAGE_TYPES.ACK,
+          data: { originalSeq: data.seq, scriptVersion: data.scriptVersion }
+        })
+      })
+    )
+    
+    // Handle PAUSE command
+    cleanupFunctions.push(
+      teleprompterClient.onMessage(MESSAGE_TYPES.PAUSE, (data) => {
+        console.log('⏸️ Received PAUSE')
+        scrollEngine.pause()
+        teleprompterClient.sendMessage({
+          type: MESSAGE_TYPES.ACK,
+          data: { originalSeq: data.seq, scriptVersion: data.scriptVersion }
+        })
+      })
+    )
+    
+    // Handle SEEK commands
+    cleanupFunctions.push(
+      teleprompterClient.onMessage(MESSAGE_TYPES.SEEK_ABS, (data) => {
+        console.log('🎯 Received SEEK_ABS:', data.lineIndex)
+        scrollEngine.seekAbsolute(data.lineIndex)
+        teleprompterClient.sendMessage({
+          type: MESSAGE_TYPES.ACK,
+          data: { originalSeq: data.seq, scriptVersion: data.scriptVersion }
+        })
+      })
+    )
+    
+    cleanupFunctions.push(
+      teleprompterClient.onMessage(MESSAGE_TYPES.SEEK_REL, (data) => {
+        console.log('↕️ Received SEEK_REL:', data.deltaLines)
+        scrollEngine.seekRelative(data.deltaLines)
+        teleprompterClient.sendMessage({
+          type: MESSAGE_TYPES.ACK,
+          data: { originalSeq: data.seq, scriptVersion: data.scriptVersion }
+        })
+      })
+    )
+    
+    // Handle JUMP commands
+    cleanupFunctions.push(
+      teleprompterClient.onMessage(MESSAGE_TYPES.JUMP_TOP, (data) => {
+        console.log('⬆️ Received JUMP_TOP')
+        scrollEngine.jumpTop()
+        teleprompterClient.sendMessage({
+          type: MESSAGE_TYPES.ACK,
+          data: { originalSeq: data.seq, scriptVersion: data.scriptVersion }
+        })
+      })
+    )
+    
+    cleanupFunctions.push(
+      teleprompterClient.onMessage(MESSAGE_TYPES.JUMP_END, (data) => {
+        console.log('⬇️ Received JUMP_END')
+        scrollEngine.jumpEnd()
+        teleprompterClient.sendMessage({
+          type: MESSAGE_TYPES.ACK,
+          data: { originalSeq: data.seq, scriptVersion: data.scriptVersion }
+        })
+      })
+    )
+    
+    // Handle keyframe requests
+    cleanupFunctions.push(
+      teleprompterClient.onMessage(MESSAGE_TYPES.REQUEST_KF, (data) => {
+        console.log('📡 Keyframe requested')
+        scrollEngine.sendKeyframe('REQUESTED')
+      })
+    )
+    
+    return () => {
+      cleanupFunctions.forEach(cleanup => cleanup())
+    }
+  }, [teleprompterClient, scrollEngine])
+
+  // Handle user interaction for iOS Safari
+  const handleUserInteraction = () => {
+    if (!hasUserInteracted) {
+      setHasUserInteracted(true)
+      console.log('👆 User interaction detected')
+    }
+  }
+
+  // Handle manual touch scrolling
+  const handleTouchScroll = (deltaY) => {
+    if (scrollEngine.engineState === STATES.PLAYING) {
+      const currentPos = scrollEngine.getCurrentPosition()
+      const newScrollY = Math.max(0, currentPos.scrollY + deltaY)
+      scrollEngine.handleManualScroll(newScrollY)
+    }
+  }
+
+  // Touch event handlers
+  const [touchState, setTouchState] = useState({ startY: 0, lastY: 0, isDragging: false })
+
+  const handleTouchStart = (e) => {
+    handleUserInteraction()
+    const touch = e.touches[0]
+    setTouchState({
+      startY: touch.clientY,
+      lastY: touch.clientY,
+      isDragging: true
+    })
+  }
+
+  const handleTouchMove = (e) => {
+    e.preventDefault()
+    if (!touchState.isDragging) return
+
+    const touch = e.touches[0]
+    const deltaY = touchState.lastY - touch.clientY
+    
+    if (Math.abs(deltaY) > 2) { // Threshold to avoid jitter
+      handleTouchScroll(deltaY * 2) // Amplify for better control
+      setTouchState(prev => ({ ...prev, lastY: touch.clientY }))
+    }
+  }
+
+  const handleTouchEnd = () => {
+    setTouchState(prev => ({ ...prev, isDragging: false }))
+  }
 
   // Sync settings from localStorage (for real-time updates)
   useEffect(() => {
@@ -261,38 +421,43 @@ const AusspielungPageInternal = () => {
             >
               🎛️ Zur Regie
             </button>
-            <h1 className="text-white font-medium">📺 Ausspielung</h1>
+            <h1 className="text-white font-medium">📺 iPad Ausspielung v2.0</h1>
           </div>
           
           <div className="flex items-center gap-4">
-            {currentSettings.superLightMode && (
-              <div className="text-xs px-2 py-1 rounded bg-purple-600 text-white font-medium">
-                ⚡ Super Light Modus
-              </div>
-            )}
-            {hostingInfo.isFreeTier && !currentSettings.superLightMode && (
-              <div className="text-xs px-2 py-1 rounded bg-orange-600 text-white font-medium">
-                ⚡ Free Tier - Reduzierte Performance
-              </div>
-            )}
             <div className={`text-xs px-2 py-1 rounded font-medium ${
-              connectionStatus === 'connected' 
+              scrollEngine.engineState === STATES.PLAYING ? 'bg-green-600' :
+              scrollEngine.engineState === STATES.PAUSED ? 'bg-yellow-600' :
+              scrollEngine.engineState === STATES.READY ? 'bg-blue-600' :
+              'bg-gray-600'
+            } text-white`}>
+              {scrollEngine.engineState === STATES.PLAYING ? '▶️ Playing' :
+               scrollEngine.engineState === STATES.PAUSED ? '⏸️ Paused' :
+               scrollEngine.engineState === STATES.READY ? '🔄 Ready' :
+               scrollEngine.engineState === STATES.LOADED ? '📄 Loaded' :
+               '⭕ Idle'}
+            </div>
+            
+            <div className={`text-xs px-2 py-1 rounded font-medium ${
+              teleprompterClient.connectionStatus === 'connected' 
                 ? 'bg-green-600 text-white' 
-                : connectionStatus === 'connecting'
+                : teleprompterClient.connectionStatus === 'connecting'
                 ? 'bg-yellow-600 text-white'
                 : 'bg-red-600 text-white'
             }`}>
-              {connectionStatus === 'connected' ? '🟢 Sync' :
-               connectionStatus === 'connecting' ? '🟡 Verbinde...' : '🔴 Offline'}
+              {teleprompterClient.connectionStatus === 'connected' ? '🟢 Connected' :
+               teleprompterClient.connectionStatus === 'connecting' ? '🟡 Connecting...' : '🔴 Disconnected'}
             </div>
+            
             <div className="text-sm text-gray-400">
-              Position: {Math.round(scrollPosition)}px
+              Line: {scrollEngine.getCurrentPosition().lineIndex} | FPS: {scrollEngine.performanceMetrics.fps}
             </div>
+            
             <button
               onClick={toggleFullscreen}
               className="px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm transition-colors"
             >
-              {isFullscreen ? '🔲 Vollbild verlassen' : '⛶ Vollbild'}
+              {isFullscreen ? '🔲 Exit Fullscreen' : '⛶ Fullscreen'}
             </button>
           </div>
         </div>
@@ -309,101 +474,156 @@ const AusspielungPageInternal = () => {
         </button>
       )}
 
-      {/* Main teleprompter display */}
+      {/* Main teleprompter display - iPad Authoritative */}
       <div 
-        ref={previewRef}
+        ref={containerRef}
         className="flex-1 overflow-hidden bg-black relative"
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onClick={handleUserInteraction}
         style={{
-          cursor: isDragging ? 'grabbing' : 'grab',
-          userSelect: 'none'
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTouchCallout: 'none'
         }}
       >
-        {/* Speed Display */}
+        {/* Performance and State Display */}
         <div style={{
           position: 'absolute',
-          top: isFullscreen ? '4px' : '20px',
-          right: isFullscreen ? '4px' : '20px',
-          backgroundColor: isFullscreen ? 'rgba(0, 0, 0, 0.4)' : 'rgba(0, 0, 0, 0.8)',
-          color: isFullscreen ? 'rgba(255, 255, 255, 0.6)' : 'white',
-          padding: isFullscreen ? '6px 10px' : '12px 16px',
+          top: isFullscreen ? '8px' : '20px',
+          right: isFullscreen ? '8px' : '20px',
+          backgroundColor: isFullscreen ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.8)',
+          color: isFullscreen ? 'rgba(255, 255, 255, 0.8)' : 'white',
+          padding: isFullscreen ? '8px 12px' : '12px 16px',
           borderRadius: '8px',
-          fontSize: isFullscreen ? '12px' : '16px',
+          fontSize: isFullscreen ? '14px' : '16px',
           fontWeight: 'bold',
           zIndex: 20,
-          border: isFullscreen ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(255, 255, 255, 0.2)',
-          opacity: isFullscreen ? 0.7 : 1,
-          transition: 'all 0.3s ease'
+          border: isFullscreen ? '1px solid rgba(255, 255, 255, 0.2)' : '1px solid rgba(255, 255, 255, 0.3)',
+          opacity: isFullscreen ? 0.8 : 1,
+          transition: 'all 0.3s ease',
+          fontFamily: 'monospace'
         }}>
-          Speed: {((currentSettings.speed || 0.5) * 10).toFixed(1)}
+          <div>Speed: {scrollEngine.currentParams.speed}/min</div>
+          <div>Line: {scrollEngine.getCurrentPosition().lineIndex}/{scrollEngine.lines.length}</div>
+          <div>FPS: {scrollEngine.performanceMetrics.fps}</div>
+          {teleprompterClient.rtt > 0 && <div>RTT: {teleprompterClient.rtt.toFixed(0)}ms</div>}
         </div>
         
-        <div className="h-full flex items-start justify-center overflow-auto">
+        {/* Touch interaction hint */}
+        {!hasUserInteracted && (
+          <div style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            color: 'white',
+            padding: '20px 30px',
+            borderRadius: '12px',
+            fontSize: '18px',
+            textAlign: 'center',
+            zIndex: 30,
+            animation: 'pulse 2s infinite'
+          }}>
+            👆 Touch screen to activate controls
+          </div>
+        )}
+        
+        <div className="h-full flex items-start justify-center overflow-hidden">
           <div style={{
             fontFamily: 'system-ui, sans-serif',
-            fontSize: `${currentSettings.fontSize || 48}px`,
-            lineHeight: currentSettings.lineHeight || 1.4,
+            fontSize: `${scrollEngine.currentParams.fontSize}px`,
+            lineHeight: scrollEngine.currentParams.lineHeight,
             color: 'white',
-            paddingLeft: `${currentSettings.padding || 100}px`,
-            paddingRight: `${currentSettings.padding || 100}px`,
+            paddingLeft: `${scrollEngine.currentParams.margins}px`,
+            paddingRight: `${scrollEngine.currentParams.margins}px`,
             paddingTop: '40px',
             paddingBottom: '40px',
             whiteSpace: 'pre-wrap',
             wordWrap: 'break-word',
-            // Performance-optimized transform based on hosting provider
-            ...(() => {
-              const optimized = optimizeScrollAnimation(scrollPosition + 180, perfSettings)
-              return {
-                transform: `${optimized.transform} 
-                           scaleX(${currentSettings.mirrorHorizontal ? -1 : 1}) 
-                           scaleY(${currentSettings.mirrorVertical ? -1 : 1})`,
-                willChange: optimized.willChange,
-                backfaceVisibility: 'hidden',
-                perspective: '1000px'
-              }
-            })(),
-            transition: 'none',
-            width: '1000px',
-            minWidth: '1000px',
+            // Authoritative transform - only source of truth
+            transform: `translate3d(0, ${-scrollEngine.getCurrentPosition().scrollY}px, 0) 
+                       scaleX(${scrollEngine.currentParams.mirror?.horizontal ? -1 : 1}) 
+                       scaleY(${scrollEngine.currentParams.mirror?.vertical ? -1 : 1})`,
+            // Hardware acceleration for 60fps
+            willChange: 'transform',
+            backfaceVisibility: 'hidden',
+            perspective: '1000px',
+            transition: 'none', // No transitions - pure rAF control
+            width: '90vw',
+            maxWidth: '1000px',
             textAlign: 'left',
             // Font rendering optimization
             WebkitFontSmoothing: 'antialiased',
             MozOsxFontSmoothing: 'grayscale',
-            // Prevent layout shifts
+            // Performance containment
             contain: 'layout style paint'
           }}>
-            {processedContent}
+            {scrollEngine.lines.map((line, index) => (
+              <div 
+                key={index} 
+                style={{ 
+                  minHeight: `${scrollEngine.currentParams.fontSize * scrollEngine.currentParams.lineHeight}px`,
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+                dangerouslySetInnerHTML={{ __html: line.text || '&nbsp;' }} 
+              />
+            ))}
           </div>
         </div>
       </div>
 
       {/* Touch controls for mobile */}
-      <div className="md:hidden bg-gray-900 px-4 py-3 flex justify-center gap-4">
-        <button
-          onTouchStart={() => setScrollPosition(prev => Math.max(0, prev - 50))}
-          className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded text-white text-lg"
-        >
-          ⬆️
-        </button>
-        <button
-          onTouchStart={() => setScrollPosition(prev => Math.min(prev + 50, 50000))}
-          className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded text-white text-lg"
-        >
-          ⬇️
-        </button>
-      </div>
+      {!isFullscreen && hasUserInteracted && (
+        <div className="bg-gray-900 px-4 py-3 flex justify-center gap-4">
+          <button
+            onTouchStart={() => scrollEngine.seekRelative(-5)}
+            className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded text-white text-lg"
+          >
+            ⏮️ -5
+          </button>
+          <button
+            onTouchStart={() => scrollEngine.seekRelative(-1)}
+            className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded text-white text-lg"
+          >
+            ⬆️ -1
+          </button>
+          <button
+            onTouchStart={() => 
+              scrollEngine.engineState === STATES.PLAYING ? 
+                scrollEngine.pause() : 
+                scrollEngine.play()
+            }
+            className={`px-6 py-3 rounded text-white text-lg ${
+              scrollEngine.engineState === STATES.PLAYING ? 
+                'bg-red-600 hover:bg-red-700' : 
+                'bg-green-600 hover:bg-green-700'
+            }`}
+          >
+            {scrollEngine.engineState === STATES.PLAYING ? '⏸️' : '▶️'}
+          </button>
+          <button
+            onTouchStart={() => scrollEngine.seekRelative(1)}
+            className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded text-white text-lg"
+          >
+            ⬇️ +1
+          </button>
+          <button
+            onTouchStart={() => scrollEngine.seekRelative(5)}
+            className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded text-white text-lg"
+          >
+            ⏭️ +5
+          </button>
+        </div>
+      )}
     </div>
   )
 }
 
-// Wrapper component with WebSocket Provider
-const AusspielungPage = () => {
-  return (
-    <NewWebSocketProvider>
-      <AusspielungPageInternal />
-    </NewWebSocketProvider>
-  )
-}
+// Direct export - no wrapper needed, client is self-contained
+const AusspielungPage = AusspielungPageInternal
 
 export default AusspielungPage
