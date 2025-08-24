@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react'
-import TeleprompterDisplay from './TeleprompterDisplay'
+import TeleprompterDisplay, { getRecommendedSize, calculateDimensions } from './TeleprompterDisplay'
 
 const SimpleTeleprompter = () => {
   // Basis State
   const [text, setText] = useState('Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n\nUt enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.\n\nDuis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.\n\nExcepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\n\nSed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam.\n\nEaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo.\n\nNemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores.\n\nEos qui ratione voluptatem sequi nesciunt neque porro quisquam est, qui dolorem ipsum quia dolor sit amet.\n\nConsectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam.\n\nAliquam quaerat voluptatem ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit.\n\nLaboriosam, nisi ut aliquid ex ea commodi consequatur quis autem vel eum iure reprehenderit qui in ea.\n\nVoluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla.\n\nPariatur at vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum.\n\nDeleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident.\n\nSimilique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga.\n\nEt harum quidem rerum facilis est et expedita distinctio nam libero tempore cum soluta nobis est.\n\nEligendi optio cumque nihil impedit quo minus id quod maxime placeat facere possimus omnis voluptas.\n\nAssumenda est, omnis dolor repellendus temporibus autem quibusdam et aut officiis debitis aut rerum.\n\nNecessitatibus saepe eveniet ut et voluptates repudiandae sint et molestiae non recusandae itaque earum.\n\nRerum hic tenetur a sapiente delectus ut aut reiciendis voluptatibus maiores alias consequatur aut.\n\nPerferendis doloribus asperiores repellat nam cum soluta nobis est eligendi optio cumque nihil impedit.\n\nQuo minus id quod maxime placeat facere possimus omnis voluptas assumenda est omnis dolor repellendus.\n\nTemporibus autem quibusdam et aut officiis debitis aut rerum necessitatibus saepe eveniet ut voluptates.\n\nRepudiandae sint et molestiae non recusandae itaque earum rerum hic tenetur a sapiente delectus.\n\nUt aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus asperiores repellat. 🎉')
   const [isPlaying, setIsPlaying] = useState(false)
-  const [speed, setSpeed] = useState(3)
+  const [speed, setSpeed] = useState(5)
   const [scrollPosition, setScrollPosition] = useState(0)
   const [connectionStatus, setConnectionStatus] = useState('disconnected')
   const [debugLogs, setDebugLogs] = useState([])
@@ -23,6 +23,9 @@ const SimpleTeleprompter = () => {
   
   // Display Format - nur noch iPad Pro in 4:3
   const [displayFormat, setDisplayFormat] = useState('ipad11')
+  
+  // Display Size - Smart Presets mit Auto-Detection
+  const [sizePreset, setSizePreset] = useState('auto')
   
   // iPad Pro Formate - beide in 4:3 Landscape-Modus
   const ipadFormats = {
@@ -49,21 +52,20 @@ const SimpleTeleprompter = () => {
   const animationRef = useRef(null)
   const wsRef = useRef(null)
 
-  // Berechne realitätsgetreue Skalierung für iPad-Preview in 4:3 Landscape
-  const getRealisticScale = (format) => {
-    const baseSize = 25 // cm - Basis für iPad 11" als Referenz
-    const currentFormat = ipadFormats[format]
+  // Berechne Preview-Skalierung basierend auf Display-Größe und verfügbarem Platz
+  const getPreviewScale = () => {
+    const dimensions = calculateDimensions(sizePreset)
+    const maxPreviewHeight = window.innerHeight * 0.45 // Max 45vh
+    const maxPreviewWidth = window.innerWidth * 0.6   // Max 60vw für rechte Seite
     
-    if (!currentFormat || !currentFormat.physicalWidth) {
-      return 1 // Fallback
-    }
+    // Skalierung berechnen, um in Preview-Container zu passen
+    const scaleByHeight = maxPreviewHeight / dimensions.height
+    const scaleByWidth = maxPreviewWidth / dimensions.width
     
-    // Skalierungsfaktor basierend auf physischer Größe (4:3 Landscape)
-    // iPad 11" (24.7cm) → 100% (Referenz)
-    // iPad 13" (28.1cm) → 88% (etwas kleiner skaliert für bessere Vergleichbarkeit)
-    const scaleFactor = baseSize / currentFormat.physicalWidth
+    // Kleinere Skalierung verwenden, damit es reinpasst
+    const scale = Math.min(scaleByHeight, scaleByWidth, 1.0)
     
-    return Math.max(scaleFactor, 0.8) // Minimum 80% Skalierung
+    return Math.max(scale, 0.2) // Minimum 20% für sehr große Displays
   }
 
   // Debug helper
@@ -185,7 +187,8 @@ const SimpleTeleprompter = () => {
             flipHorizontal,
             flipVertical,
             displayFormat,
-            aspectRatio: ipadFormats[displayFormat]?.ratio || displayFormat
+            aspectRatio: ipadFormats[displayFormat]?.ratio || displayFormat,
+            sizePreset
           })
           const ipadInfo = ` iPad: ${displayFormat === 'ipad11' ? '11"' : '13"'}`
           addDebugLog(`📍 Manual pos: ${Math.round(currentPos)}px, Font: ${fontSize}, Margin: ${margin},${ipadInfo}, H: ${flipHorizontal}, V: ${flipVertical}`)
@@ -198,7 +201,7 @@ const SimpleTeleprompter = () => {
         clearInterval(positionSyncTimer)
       }
     }
-  }, [isPlaying, fontSize, margin, flipHorizontal, flipVertical, displayFormat])
+  }, [isPlaying, fontSize, margin, flipHorizontal, flipVertical, displayFormat, sizePreset])
 
   // Berechne Scroll-Rate für Regie-Preview (identisch zum iPad)
   const calculateScrollRate = () => {
@@ -299,18 +302,18 @@ const SimpleTeleprompter = () => {
 
       {/* Rechts: Preview + Controls - Rest 70% */}
       <div className="flex-1 flex flex-col">
-        {/* Shadow Mount Preview - OBEN - max 50% Höhe */}
+        {/* Smart Preview - OBEN - max 50% Höhe */}
         <div className="flex items-center justify-center bg-gray-800 p-4" style={{ maxHeight: '50vh' }}>
           <div 
             className="cursor-pointer border-3 border-blue-600 rounded-lg shadow-2xl"
             onWheel={handleWheel}
             style={{
-              // Shadow Mount: Original-Größe skaliert für Preview
-              transform: `scale(${getRealisticScale(displayFormat) * 0.8})`, // 80% für bessere Preview-Größe
+              // Smart Scaling: Dynamische Größe skaliert für Preview
+              transform: `scale(${getPreviewScale()})`,
               transformOrigin: 'center center',
-              // Container für die originale 640x480 Komponente
-              width: '640px',
-              height: '480px'
+              // Container für die dynamische Display-Komponente
+              width: `${calculateDimensions(sizePreset).width}px`,
+              height: `${calculateDimensions(sizePreset).height}px`
             }}
           >
             <TeleprompterDisplay
@@ -320,6 +323,7 @@ const SimpleTeleprompter = () => {
               margin={margin}
               flipHorizontal={flipHorizontal}
               flipVertical={flipVertical}
+              sizePreset={sizePreset}
             />
           </div>
         </div>
@@ -391,6 +395,28 @@ const SimpleTeleprompter = () => {
               disabled={isPlaying}
               className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider disabled:opacity-50"
             />
+          </div>
+
+          {/* Display Size Control */}
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <label className="text-sm font-medium text-gray-300">Display Size</label>
+              <span className="text-xs text-gray-400">
+                {calculateDimensions(sizePreset).width}×{calculateDimensions(sizePreset).height}px
+              </span>
+            </div>
+            <select 
+              value={sizePreset} 
+              onChange={(e) => setSizePreset(e.target.value)}
+              disabled={isPlaying}
+              className="w-full bg-gray-700 rounded px-3 py-2 text-white disabled:opacity-50 border border-gray-600 focus:border-blue-500 focus:outline-none"
+            >
+              <option value="auto">Auto ({getRecommendedSize()})</option>
+              <option value="small">Small - Desktop/Mobile</option>
+              <option value="medium">Medium - Standard iPad</option> 
+              <option value="large">Large - Big iPad</option>
+              <option value="xlarge">XL - Pro iPad</option>
+            </select>
           </div>
 
           {/* Toggles Row */}
