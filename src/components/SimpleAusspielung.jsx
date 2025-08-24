@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import TeleprompterDisplay from './TeleprompterDisplay'
 
 const SimpleAusspielung = () => {
   // State
@@ -19,12 +20,14 @@ const SimpleAusspielung = () => {
   
   // Vollbild-Modus
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isBrowserFullscreen, setIsBrowserFullscreen] = useState(false)
   
   // Position-Feedback für Regie
   const [lastSentPercentage, setLastSentPercentage] = useState(0)
   
-  // Display Format
-  const [displayFormat, setDisplayFormat] = useState('16:9')
+  // Display Format - nur iPad Pro in 4:3
+  const [displayFormat, setDisplayFormat] = useState('ipad11')
+  const [aspectRatio, setAspectRatio] = useState('4/3')
   
   const teleprompterRef = useRef(null)
   const animationRef = useRef(null)
@@ -113,6 +116,11 @@ const SimpleAusspielung = () => {
             if (data.displayFormat !== undefined) {
               setDisplayFormat(data.displayFormat)
               addDebugLog(`📐 Display format: ${data.displayFormat}`)
+            }
+            if (data.aspectRatio !== undefined) {
+              setAspectRatio(data.aspectRatio)
+              addDebugLog(`📱 Aspect ratio: ${data.aspectRatio}`)
+              console.log('🔍 Ausspielung received aspectRatio:', data.aspectRatio)
             }
           } else {
             addDebugLog(`⏭️ Ignoring manual pos (playing): ${Math.round(data.scrollPosition)}px`)
@@ -262,6 +270,87 @@ const SimpleAusspielung = () => {
     }
   }, [isPlaying, lastSentPercentage])
 
+  // Browser Vollbild API
+  const enterFullscreen = async () => {
+    try {
+      const element = document.documentElement
+      
+      if (element.requestFullscreen) {
+        await element.requestFullscreen()
+      } else if (element.webkitRequestFullscreen) {
+        await element.webkitRequestFullscreen()
+      } else if (element.mozRequestFullScreen) {
+        await element.mozRequestFullScreen()
+      } else if (element.msRequestFullscreen) {
+        await element.msRequestFullscreen()
+      }
+      
+      setIsFullscreen(true)
+      setIsBrowserFullscreen(true)
+      addDebugLog('🔳 Browser Vollbild aktiviert')
+    } catch (error) {
+      console.error('Fullscreen error:', error)
+      // Fallback zu unserem CSS-Vollbild
+      setIsFullscreen(true)
+      addDebugLog('⚠️ Fallback zu CSS Vollbild')
+    }
+  }
+
+  const exitFullscreen = async () => {
+    try {
+      if (document.fullscreenElement) {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen()
+        } else if (document.webkitExitFullscreen) {
+          await document.webkitExitFullscreen()
+        } else if (document.mozCancelFullScreen) {
+          await document.mozCancelFullScreen()
+        } else if (document.msExitFullscreen) {
+          await document.msExitFullscreen()
+        }
+      }
+      
+      setIsFullscreen(false)
+      setIsBrowserFullscreen(false)
+      addDebugLog('❌ Vollbild beendet')
+    } catch (error) {
+      console.error('Exit fullscreen error:', error)
+      setIsFullscreen(false)
+      setIsBrowserFullscreen(false)
+    }
+  }
+
+  // Vollbild Status überwachen
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const isFullscreen = !!(
+        document.fullscreenElement ||
+        document.webkitFullscreenElement ||
+        document.mozFullScreenElement ||
+        document.msFullscreenElement
+      )
+      
+      if (!isFullscreen && isBrowserFullscreen) {
+        // Browser Vollbild wurde extern beendet (ESC)
+        setIsFullscreen(false)
+        setIsBrowserFullscreen(false)
+        addDebugLog('❌ Vollbild extern beendet')
+      }
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange)
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange)
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange)
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange)
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange)
+    }
+  }, [isBrowserFullscreen])
+
   const getConnectionColor = () => {
     switch (connectionStatus) {
       case 'connected': return 'bg-green-600'
@@ -281,7 +370,7 @@ const SimpleAusspielung = () => {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setIsFullscreen(true)}
+              onClick={enterFullscreen}
               className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors"
             >
               🔳 Vollbild
@@ -290,7 +379,7 @@ const SimpleAusspielung = () => {
               {connectionStatus.toUpperCase()}
             </div>
             <div className="text-xs text-gray-400">
-              {isPlaying ? '▶️ PLAYING' : '⏸️ PAUSED'} | Speed: {speed} | H: {flipHorizontal ? 'ON' : 'OFF'} | V: {flipVertical ? 'ON' : 'OFF'}
+              {isPlaying ? '▶️ PLAYING' : '⏸️ PAUSED'} | Speed: {speed} | Format: {displayFormat} | Ratio: {aspectRatio} | H: {flipHorizontal ? 'ON' : 'OFF'} | V: {flipVertical ? 'ON' : 'OFF'}
             </div>
           </div>
         </div>
@@ -299,58 +388,28 @@ const SimpleAusspielung = () => {
       {/* Vollbild Exit Button - nur im Vollbild sichtbar */}
       {isFullscreen && (
         <button
-          onClick={() => setIsFullscreen(false)}
+          onClick={exitFullscreen}
           className="absolute top-4 right-4 z-50 w-8 h-8 bg-gray-600 hover:bg-gray-500 rounded text-xs transition-colors opacity-70 hover:opacity-100"
         >
           ✕
         </button>
       )}
 
-      {/* Teleprompter Display - FULLSCREEN */}
+      {/* Teleprompter Display - Original Size Fullscreen */}
       <div 
-        ref={teleprompterRef}
-        className="flex-1 overflow-hidden relative"
+        className="flex-1 overflow-hidden relative flex items-center justify-center"
         style={{
-          backgroundColor: '#000000',
-          padding: `${margin}px`,
-          transform: `scale(${flipHorizontal ? -1 : 1}, ${flipVertical ? -1 : 1})`,
-          transformOrigin: 'center center',
-          // Subtile Anpassung für 4:3 vs 16:9 - bessere Text-Verteilung
-          ...(displayFormat === '4:3' && {
-            paddingTop: `${margin * 1.2}px`,
-            paddingBottom: `${margin * 1.2}px`
-          })
+          backgroundColor: '#000000'
         }}
       >
-        <div
-          className="text-white leading-relaxed"
-          style={{
-            lineHeight: '1.8',
-            fontSize: `${fontSize}px`,
-            fontFamily: 'system-ui, -apple-system, sans-serif'
-          }}
-        >
-          {/* 5 Leerzeilen vor dem Text */}
-          {Array(5).fill(null).map((_, index) => (
-            <div key={`before-${index}`} className="mb-4">
-              &nbsp;
-            </div>
-          ))}
-          
-          {/* Haupttext */}
-          {text.split('\n').map((line, index) => (
-            <div key={index} className="mb-4">
-              {line || '\u00A0'}
-            </div>
-          ))}
-          
-          {/* 5 Leerzeilen nach dem Text */}
-          {Array(5).fill(null).map((_, index) => (
-            <div key={`after-${index}`} className="mb-4">
-              &nbsp;
-            </div>
-          ))}
-        </div>
+        <TeleprompterDisplay
+          ref={teleprompterRef}
+          text={text}
+          fontSize={fontSize}
+          margin={margin}
+          flipHorizontal={flipHorizontal}
+          flipVertical={flipVertical}
+        />
       </div>
 
       {/* Debug Console - versteckt im Vollbild */}

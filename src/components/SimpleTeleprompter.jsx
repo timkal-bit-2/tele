@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import TeleprompterDisplay from './TeleprompterDisplay'
 
 const SimpleTeleprompter = () => {
   // Basis State
@@ -20,8 +21,26 @@ const SimpleTeleprompter = () => {
   // iPad Position Tracking
   const [ipadPosition, setIpadPosition] = useState({ percentage: 0, lastUpdate: 0 })
   
-  // Display Format
-  const [displayFormat, setDisplayFormat] = useState('16:9') // '16:9' oder '4:3'
+  // Display Format - nur noch iPad Pro in 4:3
+  const [displayFormat, setDisplayFormat] = useState('ipad11')
+  
+  // iPad Pro Formate - beide in 4:3 Landscape-Modus
+  const ipadFormats = {
+    'ipad11': { 
+      ratio: '4/3', 
+      label: '11"', 
+      description: 'iPad Pro 11" - 24.7×17.0cm (4:3 Landscape)',
+      physicalWidth: 24.7, // cm - echte physische Größe
+      physicalHeight: 17.0
+    },
+    'ipad13': { 
+      ratio: '4/3', 
+      label: '13"', 
+      description: 'iPad Pro 13" - 28.1×21.1cm (4:3 Landscape)',
+      physicalWidth: 28.1, // cm - echte physische Größe  
+      physicalHeight: 21.1
+    }
+  } // '16:9' oder '4:3'
   
   // Debug Console Toggle
   const [showDebugConsole, setShowDebugConsole] = useState(false)
@@ -29,6 +48,23 @@ const SimpleTeleprompter = () => {
   const teleprompterRef = useRef(null)
   const animationRef = useRef(null)
   const wsRef = useRef(null)
+
+  // Berechne realitätsgetreue Skalierung für iPad-Preview in 4:3 Landscape
+  const getRealisticScale = (format) => {
+    const baseSize = 25 // cm - Basis für iPad 11" als Referenz
+    const currentFormat = ipadFormats[format]
+    
+    if (!currentFormat || !currentFormat.physicalWidth) {
+      return 1 // Fallback
+    }
+    
+    // Skalierungsfaktor basierend auf physischer Größe (4:3 Landscape)
+    // iPad 11" (24.7cm) → 100% (Referenz)
+    // iPad 13" (28.1cm) → 88% (etwas kleiner skaliert für bessere Vergleichbarkeit)
+    const scaleFactor = baseSize / currentFormat.physicalWidth
+    
+    return Math.max(scaleFactor, 0.8) // Minimum 80% Skalierung
+  }
 
   // Debug helper
   const addDebugLog = (message) => {
@@ -148,9 +184,11 @@ const SimpleTeleprompter = () => {
             margin,
             flipHorizontal,
             flipVertical,
-            displayFormat
+            displayFormat,
+            aspectRatio: ipadFormats[displayFormat]?.ratio || displayFormat
           })
-          addDebugLog(`📍 Manual pos: ${Math.round(currentPos)}px, Font: ${fontSize}, Margin: ${margin}, H: ${flipHorizontal}, V: ${flipVertical}`)
+          const ipadInfo = ` iPad: ${displayFormat === 'ipad11' ? '11"' : '13"'}`
+          addDebugLog(`📍 Manual pos: ${Math.round(currentPos)}px, Font: ${fontSize}, Margin: ${margin},${ipadInfo}, H: ${flipHorizontal}, V: ${flipVertical}`)
         }
       }, 200)
     }
@@ -261,52 +299,28 @@ const SimpleTeleprompter = () => {
 
       {/* Rechts: Preview + Controls - Rest 70% */}
       <div className="flex-1 flex flex-col">
-        {/* Teleprompter Display - Dynamic Format - OBEN - max 50% Höhe */}
+        {/* Shadow Mount Preview - OBEN - max 50% Höhe */}
         <div className="flex items-center justify-center bg-gray-800 p-4" style={{ maxHeight: '50vh' }}>
           <div 
-            ref={teleprompterRef}
-            className="bg-black overflow-hidden relative cursor-pointer border-2 border-gray-600 rounded-lg shadow-2xl"
+            className="cursor-pointer border-3 border-blue-600 rounded-lg shadow-2xl"
             onWheel={handleWheel}
             style={{
-              aspectRatio: displayFormat, // Dynamic: 16/9 oder 4/3
-              padding: `${margin}px`,
-              // Responsive scaling - strikt auf 50vh begrenzt
-              width: 'auto',
-              height: displayFormat === '16:9' 
-                ? 'min(calc(70vw * 9 / 16), 45vh)' // 45vh statt 50vh für Padding
-                : 'min(calc(70vw * 3 / 4), 45vh)',  // 4:3 ist höher, gleiche Begrenzung
-              maxHeight: '45vh', // Absolute Grenze für beide Formate
-              maxWidth: '100%'
+              // Shadow Mount: Original-Größe skaliert für Preview
+              transform: `scale(${getRealisticScale(displayFormat) * 0.8})`, // 80% für bessere Preview-Größe
+              transformOrigin: 'center center',
+              // Container für die originale 640x480 Komponente
+              width: '640px',
+              height: '480px'
             }}
           >
-          <div 
-            className="leading-relaxed"
-            style={{
-              lineHeight: '1.8',
-              fontSize: `${fontSize}px`
-            }}
-          >
-            {/* 5 Leerzeilen vor dem Text */}
-            {Array(5).fill(null).map((_, index) => (
-              <div key={`before-${index}`} className="mb-2">
-                &nbsp;
-              </div>
-            ))}
-            
-            {/* Haupttext */}
-            {text.split('\n').map((line, index) => (
-              <div key={index} className="mb-2">
-                {line || '\u00A0'}
-              </div>
-            ))}
-            
-            {/* 5 Leerzeilen nach dem Text */}
-            {Array(5).fill(null).map((_, index) => (
-              <div key={`after-${index}`} className="mb-2">
-                &nbsp;
-              </div>
-            ))}
-          </div>
+            <TeleprompterDisplay
+              ref={teleprompterRef}
+              text={text}
+              fontSize={fontSize}
+              margin={margin}
+              flipHorizontal={flipHorizontal}
+              flipVertical={flipVertical}
+            />
           </div>
         </div>
 
@@ -381,30 +395,25 @@ const SimpleTeleprompter = () => {
 
           {/* Toggles Row */}
           <div className="flex items-center justify-between pt-2">
-            {/* Format Toggle */}
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-gray-400">📐</span>
-              <button
-                onClick={() => setDisplayFormat('16:9')}
-                className={`px-3 py-1 rounded text-xs font-medium transition-all ${
-                  displayFormat === '16:9' 
-                    ? 'bg-blue-600 text-white shadow-md' 
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-              >
-                16:9
-              </button>
-              <button
-                onClick={() => setDisplayFormat('4:3')}
-                className={`px-3 py-1 rounded text-xs font-medium transition-all ${
-                  displayFormat === '4:3' 
-                    ? 'bg-blue-600 text-white shadow-md' 
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-              >
-                4:3
-              </button>
-            </div>
+                           {/* iPad Größe Auswahl */}
+               <div className="flex items-center gap-1">
+                 <span className="text-xs text-gray-400">📱 iPad:</span>
+                 {Object.entries(ipadFormats).map(([key, format]) => (
+                   <button
+                     key={key}
+                     onClick={() => setDisplayFormat(key)}
+                     className={`px-3 py-2 rounded text-sm font-medium transition-all ${
+                       displayFormat === key
+                         ? 'bg-blue-600 text-white shadow-md'
+                         : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                     }`}
+                     title={format.description}
+                   >
+                     {format.label}
+                   </button>
+                 ))}
+                 <span className="text-xs text-gray-400 ml-2">(4:3 Landscape)</span>
+               </div>
 
             {/* Flip Toggles */}
             <div className="flex items-center gap-1">
@@ -432,16 +441,19 @@ const SimpleTeleprompter = () => {
               </button>
             </div>
 
-            {/* iPad Position */}
-            <div className="flex items-center gap-2 bg-gray-700 rounded-lg px-3 py-1">
-              <span className="text-xs text-gray-400">📺</span>
-              <span className="text-sm font-bold text-blue-400">
-                {(ipadPosition.percentage * 100).toFixed(1)}%
-              </span>
-              <span className="text-xs">
-                {Date.now() - ipadPosition.lastUpdate < 5000 ? '🟢' : '🔴'}
-              </span>
-            </div>
+                           {/* iPad Position & Scale Info */}
+               <div className="flex items-center gap-2 bg-gray-700 rounded-lg px-3 py-1">
+                 <span className="text-xs text-gray-400">📺</span>
+                 <span className="text-sm font-bold text-blue-400">
+                   {(ipadPosition.percentage * 100).toFixed(1)}%
+                 </span>
+                 <span className="text-xs">
+                   {Date.now() - ipadPosition.lastUpdate < 5000 ? '🟢' : '🔴'}
+                 </span>
+                 <span className="text-xs text-orange-400 ml-1">
+                   {displayFormat === 'ipad11' ? '11"' : '13"'} iPad
+                 </span>
+               </div>
           </div>
         </div>
       </div>
