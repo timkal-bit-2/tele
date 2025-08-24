@@ -321,8 +321,8 @@ const SimpleTeleprompter = () => {
               text={text}
               fontSize={fontSize}
               margin={margin}
-              flipHorizontal={flipHorizontal}
-              flipVertical={flipVertical}
+              flipHorizontal={false}
+              flipVertical={false}
               sizePreset={sizePreset}
             />
           </div>
@@ -441,31 +441,34 @@ const SimpleTeleprompter = () => {
                  <span className="text-xs text-gray-400 ml-2">(4:3 Landscape)</span>
                </div>
 
-            {/* Flip Toggles */}
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setFlipHorizontal(!flipHorizontal)}
-                disabled={isPlaying}
-                className={`px-3 py-1 rounded text-xs font-medium transition-all disabled:opacity-50 ${
-                  flipHorizontal 
-                    ? 'bg-orange-600 text-white shadow-md' 
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-              >
-                ↔️
-              </button>
-              <button
-                onClick={() => setFlipVertical(!flipVertical)}
-                disabled={isPlaying}
-                className={`px-3 py-1 rounded text-xs font-medium transition-all disabled:opacity-50 ${
-                  flipVertical 
-                    ? 'bg-orange-600 text-white shadow-md' 
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-              >
-                ↕️
-              </button>
-            </div>
+                           {/* iPad Flip Toggles */}
+               <div className="flex items-center gap-1">
+                 <span className="text-xs text-gray-400">iPad:</span>
+                 <button
+                   onClick={() => setFlipHorizontal(!flipHorizontal)}
+                   disabled={isPlaying}
+                   className={`px-3 py-1 rounded text-xs font-medium transition-all disabled:opacity-50 ${
+                     flipHorizontal
+                       ? 'bg-orange-600 text-white shadow-md'
+                       : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                   }`}
+                   title="Horizontal flip (iPad only)"
+                 >
+                   ↔️
+                 </button>
+                 <button
+                   onClick={() => setFlipVertical(!flipVertical)}
+                   disabled={isPlaying}
+                   className={`px-3 py-1 rounded text-xs font-medium transition-all disabled:opacity-50 ${
+                     flipVertical
+                       ? 'bg-orange-600 text-white shadow-md'
+                       : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                   }`}
+                   title="Vertical flip (iPad only)"
+                 >
+                   ↕️
+                 </button>
+               </div>
 
                            {/* iPad Position & Scale Info */}
                <div className="flex items-center gap-2 bg-gray-700 rounded-lg px-3 py-1">
