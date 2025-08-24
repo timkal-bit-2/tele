@@ -85,6 +85,7 @@ wss.on('connection', (ws, request) => {
         case 'SIMPLE_PLAYBACK_STATE':
         case 'SIMPLE_SCROLL_POSITION':
         case 'SIMPLE_MANUAL_POSITION':
+        case 'SIMPLE_POSITION_FEEDBACK':
           // Broadcast to all other clients with priority for scroll messages
           broadcast(message, ws)
           break

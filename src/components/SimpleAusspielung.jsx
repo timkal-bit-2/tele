@@ -10,12 +10,21 @@ const SimpleAusspielung = () => {
   const [debugLogs, setDebugLogs] = useState([])
   
   // Layout-Einstellungen
-  const [fontSize, setFontSize] = useState(36)
+  const [fontSize, setFontSize] = useState(40)
   const [margin, setMargin] = useState(20)
   
   // Spiegelungsoptionen
   const [flipHorizontal, setFlipHorizontal] = useState(false)
   const [flipVertical, setFlipVertical] = useState(false)
+  
+  // Vollbild-Modus
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  
+  // Position-Feedback für Regie
+  const [lastSentPercentage, setLastSentPercentage] = useState(0)
+  
+  // Display Format
+  const [displayFormat, setDisplayFormat] = useState('16:9')
   
   const teleprompterRef = useRef(null)
   const animationRef = useRef(null)
@@ -100,6 +109,10 @@ const SimpleAusspielung = () => {
             if (data.flipVertical !== undefined) {
               setFlipVertical(data.flipVertical)
               addDebugLog(`↕️ Vertical flip: ${data.flipVertical}`)
+            }
+            if (data.displayFormat !== undefined) {
+              setDisplayFormat(data.displayFormat)
+              addDebugLog(`📐 Display format: ${data.displayFormat}`)
             }
           } else {
             addDebugLog(`⏭️ Ignoring manual pos (playing): ${Math.round(data.scrollPosition)}px`)
@@ -213,6 +226,42 @@ const SimpleAusspielung = () => {
     }
   }, [isPlaying, speed, text]) // text hinzugefügt für Neuberechnung bei Text-Änderung
 
+  // Position-Feedback an Regie senden (nur wenn pausiert)
+  useEffect(() => {
+    let feedbackTimer = null
+
+    if (!isPlaying) {
+      feedbackTimer = setInterval(() => {
+        if (teleprompterRef.current) {
+          const element = teleprompterRef.current
+          const maxScroll = element.scrollHeight - element.clientHeight
+          
+          if (maxScroll > 0) {
+            const currentPercentage = element.scrollTop / maxScroll
+            
+            // Nur senden wenn sich Position signifikant geändert hat (>1%)
+            if (Math.abs(currentPercentage - lastSentPercentage) > 0.01) {
+              sendMessage('SIMPLE_POSITION_FEEDBACK', {
+                scrollPercentage: currentPercentage,
+                maxScroll: maxScroll,
+                currentPosition: element.scrollTop
+              })
+              
+              setLastSentPercentage(currentPercentage)
+              addDebugLog(`📤 Position: ${(currentPercentage * 100).toFixed(1)}%`)
+            }
+          }
+        }
+      }, 200)
+    }
+
+    return () => {
+      if (feedbackTimer) {
+        clearInterval(feedbackTimer)
+      }
+    }
+  }, [isPlaying, lastSentPercentage])
+
   const getConnectionColor = () => {
     switch (connectionStatus) {
       case 'connected': return 'bg-green-600'
@@ -223,31 +272,54 @@ const SimpleAusspielung = () => {
   }
 
   return (
-    <div className="h-screen bg-black text-white flex flex-col">
-      {/* Status Header */}
-      <div className="bg-gray-900 p-2 flex items-center justify-between border-b border-gray-700">
-        <div className="text-sm text-gray-400">
-          📺 Simple Ausspielung
-        </div>
-        <div className="flex items-center gap-3">
-          <div className={`px-3 py-1 rounded text-xs ${getConnectionColor()}`}>
-            {connectionStatus.toUpperCase()}
+    <div className="h-screen bg-black text-white flex flex-col relative">
+      {/* Status Header - versteckt im Vollbild */}
+      {!isFullscreen && (
+        <div className="bg-gray-900 p-2 flex items-center justify-between border-b border-gray-700">
+          <div className="text-sm text-gray-400">
+            📺 Simple Ausspielung
           </div>
-          <div className="text-xs text-gray-400">
-            {isPlaying ? '▶️ PLAYING' : '⏸️ PAUSED'} | Speed: {speed} | H: {flipHorizontal ? 'ON' : 'OFF'} | V: {flipVertical ? 'ON' : 'OFF'}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsFullscreen(true)}
+              className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm transition-colors"
+            >
+              🔳 Vollbild
+            </button>
+            <div className={`px-3 py-1 rounded text-xs ${getConnectionColor()}`}>
+              {connectionStatus.toUpperCase()}
+            </div>
+            <div className="text-xs text-gray-400">
+              {isPlaying ? '▶️ PLAYING' : '⏸️ PAUSED'} | Speed: {speed} | H: {flipHorizontal ? 'ON' : 'OFF'} | V: {flipVertical ? 'ON' : 'OFF'}
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Vollbild Exit Button - nur im Vollbild sichtbar */}
+      {isFullscreen && (
+        <button
+          onClick={() => setIsFullscreen(false)}
+          className="absolute top-4 right-4 z-50 w-8 h-8 bg-gray-600 hover:bg-gray-500 rounded text-xs transition-colors opacity-70 hover:opacity-100"
+        >
+          ✕
+        </button>
+      )}
 
       {/* Teleprompter Display - FULLSCREEN */}
-            <div 
+      <div 
         ref={teleprompterRef}
         className="flex-1 overflow-hidden relative"
         style={{
           backgroundColor: '#000000',
           padding: `${margin}px`,
           transform: `scale(${flipHorizontal ? -1 : 1}, ${flipVertical ? -1 : 1})`,
-          transformOrigin: 'center center'
+          transformOrigin: 'center center',
+          // Subtile Anpassung für 4:3 vs 16:9 - bessere Text-Verteilung
+          ...(displayFormat === '4:3' && {
+            paddingTop: `${margin * 1.2}px`,
+            paddingBottom: `${margin * 1.2}px`
+          })
         }}
       >
         <div
@@ -281,15 +353,17 @@ const SimpleAusspielung = () => {
         </div>
       </div>
 
-      {/* Debug Console */}
-      <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-600 p-2 h-20 overflow-y-auto">
-        <div className="text-xs text-blue-400 font-mono">
-          <div className="font-bold mb-1">🔧 Ausspielung Debug Console:</div>
-          {debugLogs.map((log, index) => (
-            <div key={index}>{log}</div>
-          ))}
+      {/* Debug Console - versteckt im Vollbild */}
+      {!isFullscreen && (
+        <div className="fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-600 p-2 h-20 overflow-y-auto">
+          <div className="text-xs text-blue-400 font-mono">
+            <div className="font-bold mb-1">🔧 Ausspielung Debug Console:</div>
+            {debugLogs.map((log, index) => (
+              <div key={index}>{log}</div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
