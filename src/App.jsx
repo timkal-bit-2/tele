@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { NewWebSocketProvider, useNewWebSocket } from './hooks/useNewWebSocket.jsx'
+import P2PConnection from './components/P2PConnection'
 
 // Teleprompter Preview Component
 const TeleprompterPreview = ({ 
@@ -193,22 +193,11 @@ const ResizablePanel = ({ children, defaultSize = 300, minSize = 200, maxSize = 
   )
 }
 
-// Teleprompter Regie - Hauptkomponente mit WebSocket
-const TeleprompterRegieInternal = ({ onReset }) => {
+// Teleprompter Regie - Hauptkomponente
+const TeleprompterRegie = ({ onReset }) => {
   console.log('TeleprompterRegie rendering...')
   
   const navigate = useNavigate()
-  
-  // WebSocket connection
-  const {
-    connectionStatus,
-    isConnected,
-    sendScrollPosition,
-    sendSettingsUpdate,
-    sendContentUpdate,
-    onMessage,
-    MESSAGE_TYPES
-  } = useNewWebSocket()
   const [rawContent, setRawContent] = useState('Dies ist ein Test-Text für die Teleprompter-Vorschau. Wenn du das siehst, funktioniert die Anzeige.')
   const [files, setFiles] = useState([])
   const [activeFileId, setActiveFileId] = useState(null)
@@ -225,8 +214,7 @@ const TeleprompterRegieInternal = ({ onReset }) => {
     readingLinePosition: 25,
     mirrorHorizontal: false,
     mirrorVertical: false,
-    emptyLinesAtStart: 2,
-    superLightMode: false
+    emptyLinesAtStart: 2
   })
   const [scrollPosition, setScrollPosition] = useState(0)  // Always start at 0 for mouse scroll
   const [isDraggingLine, setIsDraggingLine] = useState(false)
@@ -242,18 +230,15 @@ const TeleprompterRegieInternal = ({ onReset }) => {
   })
   const [presetName, setPresetName] = useState('')
   const [editingPresetIndex, setEditingPresetIndex] = useState(null)
+  const [p2pConnection, setP2pConnection] = useState(null)
+  const [p2pConnected, setP2pConnected] = useState(false)
   const intervalRef = useRef(null)
   const previewRef = useRef(null)
 
-  // Sync scroll position via WebSocket and localStorage
+  // Sync scroll position to localStorage for Ausspielung page
   useEffect(() => {
     localStorage.setItem('mainScrollPosition', scrollPosition.toString())
-    
-    // Send scroll position via WebSocket if connected (with super light mode awareness)
-    if (isConnected) {
-      sendScrollPosition(scrollPosition, settings.superLightMode)
-    }
-  }, [scrollPosition, isConnected, sendScrollPosition, settings.superLightMode])
+  }, [scrollPosition])
 
   // Listen for scroll position updates from Ausspielung page
   useEffect(() => {
@@ -346,42 +331,27 @@ const TeleprompterRegieInternal = ({ onReset }) => {
     document.body.removeChild(element)
   }
 
-  // Optimized auto-scroll with requestAnimationFrame for smooth 60fps
+  // Auto-scroll functionality (Memory-optimiert)
   useEffect(() => {
     if (playbackState.isScrolling) {
-      let lastTime = performance.now()
-      
-      const animateScroll = (currentTime) => {
-        const deltaTime = (currentTime - lastTime) / 1000 // Convert to seconds
-        lastTime = currentTime
-        
+      intervalRef.current = setInterval(() => {
         setScrollPosition(prev => {
-          // Calculate pixels per second based on speed
-          const pixelsPerSecond = settings.speed * 50 // Adjust multiplier for desired speed
-          const increment = pixelsPerSecond * deltaTime
-          const newPos = prev + increment
-          
-          // Prevent excessive values
-          return Math.min(newPos, 50000)
+          const newPos = prev + (settings.speed * 10)
+          // Verhindere endlose Updates bei sehr hohen Werten
+          return Math.min(newPos, 50000) // Max 50k Pixel
         })
-        
-        if (playbackState.isScrolling) {
-          intervalRef.current = requestAnimationFrame(animateScroll)
-        }
-      }
-      
-      intervalRef.current = requestAnimationFrame(animateScroll)
+      }, 50)
     } else {
       if (intervalRef.current) {
-        cancelAnimationFrame(intervalRef.current)
-        intervalRef.current = null
+        clearInterval(intervalRef.current)
+        intervalRef.current = null // Explizit null setzen
       }
     }
 
     return () => {
       if (intervalRef.current) {
-        cancelAnimationFrame(intervalRef.current)
-        intervalRef.current = null
+        clearInterval(intervalRef.current)
+        intervalRef.current = null // Cleanup
       }
     }
   }, [playbackState.isScrolling, settings.speed])
@@ -396,11 +366,6 @@ const TeleprompterRegieInternal = ({ onReset }) => {
     
     // Save to localStorage for Ausspielung page sync
     localStorage.setItem('teleprompter-settings', JSON.stringify(newSettings))
-    
-    // Send settings via WebSocket if connected
-    if (isConnected) {
-      sendSettingsUpdate(newSettings)
-    }
     
     if (key === 'speed') {
       setPlaybackState(prev => ({ ...prev, speed: value }))
@@ -507,24 +472,42 @@ const TeleprompterRegieInternal = ({ onReset }) => {
     localStorage.setItem('teleprompter-presets', JSON.stringify(updated))
   }
 
-  // Send content updates via WebSocket when content changes
+  // P2P Connection Handlers
+  const handleP2PConnectionEstablished = (connection) => {
+    console.log('✅ P2P connection established')
+    setP2pConnection(connection)
+    setP2pConnected(true)
+  }
+
+  const handleP2PConnectionLost = () => {
+    console.log('❌ P2P connection lost')
+    setP2pConnection(null)
+    setP2pConnected(false)
+  }
+
+  const handleP2PMessage = (message) => {
+    console.log('📥 P2P message received:', message.type)
+    // Handle incoming messages from iPad if needed
+  }
+
+  // Send content and settings via P2P when they change
   useEffect(() => {
-    if (isConnected && rawContent) {
-      sendContentUpdate(rawContent, settings)
+    if (p2pConnection && p2pConnected) {
+      p2pConnection.send('CONTENT_UPDATE', {
+        content: rawContent,
+        settings: settings
+      })
     }
-  }, [isConnected, rawContent, settings, sendContentUpdate])
+  }, [rawContent, settings, p2pConnection, p2pConnected])
 
-  // Listen for incoming WebSocket messages from Ausspielung
+  // Send scroll position via P2P
   useEffect(() => {
-    const cleanup = onMessage(MESSAGE_TYPES.SCROLL_POSITION, (data) => {
-      console.log('📥 Received scroll position from Ausspielung:', data.scrollPosition)
-      if (Math.abs(data.scrollPosition - scrollPosition) > 5) {
-        setScrollPosition(data.scrollPosition)
-      }
-    })
-
-    return cleanup
-  }, [onMessage, MESSAGE_TYPES, scrollPosition])
+    if (p2pConnection && p2pConnected) {
+      p2pConnection.send('SCROLL_POSITION', {
+        scrollPosition: scrollPosition
+      })
+    }
+  }, [scrollPosition, p2pConnection, p2pConnected])
 
   return (
     <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
@@ -539,20 +522,8 @@ const TeleprompterRegieInternal = ({ onReset }) => {
           </button>
           <h1 className="text-lg font-medium text-white">🎛️ Teleprompter Regie</h1>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="text-xs text-gray-500">
-            Professionelle Teleprompter-Steuerung
-          </div>
-          <div className={`text-xs px-2 py-1 rounded font-medium ${
-            connectionStatus === 'connected' 
-              ? 'bg-green-600 text-white' 
-              : connectionStatus === 'connecting'
-              ? 'bg-yellow-600 text-white'
-              : 'bg-red-600 text-white'
-          }`}>
-            {connectionStatus === 'connected' ? '🟢 Verbunden' :
-             connectionStatus === 'connecting' ? '🟡 Verbinde...' : '🔴 Getrennt'}
-          </div>
+        <div className="text-xs text-gray-500">
+          Professionelle Teleprompter-Steuerung
         </div>
       </div>
       
@@ -769,6 +740,16 @@ const TeleprompterRegieInternal = ({ onReset }) => {
                 </div>
               </div>
 
+              {/* P2P Direct Connection */}
+              <div className="border-t border-gray-700 p-3">
+                <P2PConnection
+                  mode="host"
+                  onConnectionEstablished={handleP2PConnectionEstablished}
+                  onConnectionLost={handleP2PConnectionLost}
+                  onMessage={handleP2PMessage}
+                />
+              </div>
+
               {/* Small Preview Window */}
               <div className="border-t border-gray-700 p-3">
                 <h4 className="text-xs text-gray-400 mb-2">📡 Ausspielung</h4>
@@ -805,7 +786,7 @@ const TeleprompterRegieInternal = ({ onReset }) => {
                   📺 Ausspielung öffnen
                 </button>
                 
-                                {/* Mirror Controls */}
+                {/* Mirror Controls */}
                 <div className="space-y-2">
                   <label className="flex items-center text-xs text-gray-300">
                     <input
@@ -826,25 +807,6 @@ const TeleprompterRegieInternal = ({ onReset }) => {
                     Vertikal spiegeln
                   </label>
                 </div>
-                
-                {/* Super Light Mode */}
-                <div className="border-t border-gray-700 pt-3 mt-3">
-                  <label className="flex items-center text-xs text-gray-300">
-                    <input
-                      type="checkbox"
-                      checked={settings.superLightMode}
-                      onChange={(e) => updateSetting('superLightMode', e.target.checked)}
-                      className="mr-2"
-                    />
-                    <span className="flex items-center gap-1">
-                      ⚡ Super Light Modus
-                      <span className="text-orange-400 text-xs">(Free Tier)</span>
-                    </span>
-                  </label>
-                  <div className="text-xs text-gray-500 mt-1 ml-5">
-                    Maximale Performance für Render.com Free Tier
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -853,99 +815,28 @@ const TeleprompterRegieInternal = ({ onReset }) => {
 
       {/* Right Panel - Preview and Editor */}
       <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-        {settings.superLightMode ? (
-          /* Super Light Mode: 50/50 Split */
-          <div className="flex-1 flex overflow-hidden">
-            {/* Left: Text Editor with Reading Line */}
-            <div className="flex-1 bg-gray-900 border-r border-gray-700 flex flex-col">
-              <div className="bg-gray-800 px-4 py-2 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
-                <h3 className="text-sm font-medium text-gray-300">✏️ Text Editor (Super Light)</h3>
-                <div className="flex items-center gap-3">
-                  <div className="text-xs text-orange-400">
-                    ⚡ Performance Modus
-                  </div>
-                  <div className="text-xs text-gray-500">
-                    Zeichen: {rawContent.length}
-                  </div>
-                </div>
-              </div>
-              <div className="flex-1 relative overflow-hidden">
-                <textarea
-                  value={rawContent}
-                  onChange={(e) => setRawContent(e.target.value)}
-                  className="w-full h-full p-4 bg-gray-900 text-white resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm leading-relaxed"
-                  placeholder="Geben Sie hier Ihren Teleprompter-Text ein..."
-                  spellCheck={false}
-                />
-                {/* Reading Line in Text Editor */}
-                {settings.showReadingLine && (
-                  <div style={{
-                    position: 'absolute',
-                    top: `${settings.readingLinePosition}%`,
-                    left: 0,
-                    right: 0,
-                    height: '2px',
-                    backgroundColor: 'red',
-                    zIndex: 10,
-                    opacity: 0.8,
-                    pointerEvents: 'none'
-                  }} />
-                )}
-              </div>
-            </div>
-            
-            {/* Right: Small Static Preview */}
-            <div className="w-80 bg-gray-950 flex flex-col">
-              <div className="bg-gray-800 px-4 py-2 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
-                <h3 className="text-sm font-medium text-gray-300">📺 Static Preview</h3>
-                <div className="text-xs text-gray-500">
-                  Font Preview
-                </div>
-              </div>
-              <div className="flex-1">
-                <TeleprompterPreview
-                  previewRef={null}
-                  rawContent={rawContent}
-                  settings={settings}
-                  scrollPosition={0}
-                  playbackState={{isScrolling: false}}
-                  isDraggingText={false}
-                  isDraggingLine={false}
-                  handleWheel={() => {}}
-                  handleMouseDown={null}
-                  handleLineMouseDown={null}
-                  showControls={false}
-                  isSmall={true}
-                  enableMirroring={true}
-                />
-              </div>
-            </div>
-          </div>
-        ) : (
-          /* Normal Mode: Large Preview + Editor */
-          <>
-            {/* Top - Teleprompter Preview */}
-            <div className="flex-1 bg-gray-950 min-h-0">
-              <TeleprompterPreview
-                previewRef={previewRef}
-                rawContent={rawContent}
-                settings={settings}
-                scrollPosition={scrollPosition}
-                playbackState={playbackState}
-                isDraggingText={isDraggingText}
-                isDraggingLine={isDraggingLine}
-                handleWheel={handleWheel}
-                handleMouseDown={handleMouseDown}
-                handleLineMouseDown={handleLineMouseDown}
-                showControls={true}
-                isSmall={false}
-                enableMirroring={false}
-              />
-            </div>
+        {/* Top - Teleprompter Preview */}
+        <div className="flex-1 bg-gray-950 min-h-0">
+          <TeleprompterPreview
+            previewRef={previewRef}
+            rawContent={rawContent}
+            settings={settings}
+            scrollPosition={scrollPosition}
+            playbackState={playbackState}
+            isDraggingText={isDraggingText}
+            isDraggingLine={isDraggingLine}
+            handleWheel={handleWheel}
+            handleMouseDown={handleMouseDown}
+            handleLineMouseDown={handleLineMouseDown}
+            showControls={true}
+            isSmall={false}
+            enableMirroring={false}
+          />
+        </div>
 
-            {/* Bottom - Text Editor (Fixed Height) */}
-            <div className="h-80 bg-gray-900 border-t border-gray-700 flex-shrink-0">
-              <div className="h-full flex flex-col">
+        {/* Bottom - Text Editor (Fixed Height) */}
+        <div className="h-80 bg-gray-900 border-t border-gray-700 flex-shrink-0">
+          <div className="h-full flex flex-col">
             <div className="bg-gray-800 px-4 py-2 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
               <h3 className="text-sm font-medium text-gray-300">✏️ Text Editor</h3>
               <div className="flex items-center gap-3">
@@ -1007,22 +898,11 @@ const TeleprompterRegieInternal = ({ onReset }) => {
               placeholder="Geben Sie hier Ihren Teleprompter-Text ein..."
               spellCheck={false}
             />
-              </div>
-            </div>
-          </>
-        )}
+          </div>
+        </div>
       </div>
       </div>
     </div>
-  )
-}
-
-// Wrapper component with WebSocket Provider
-const TeleprompterRegie = ({ onReset }) => {
-  return (
-    <NewWebSocketProvider>
-      <TeleprompterRegieInternal onReset={onReset} />
-    </NewWebSocketProvider>
   )
 }
 

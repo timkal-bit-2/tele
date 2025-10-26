@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react'
+import { WebSocketFallbackManager } from '../utils/websocketFallback'
 
 /**
  * New WebSocket Hook for Simplified Teleprompter Protocol
@@ -37,10 +38,13 @@ export const NewWebSocketProvider = ({ children }) => {
   const [connectionStatus, setConnectionStatus] = useState('disconnected')
   const [lastError, setLastError] = useState(null)
   const [messageCount, setMessageCount] = useState(0)
+  const [usingFallback, setUsingFallback] = useState(false)
+  const [connectionQuality, setConnectionQuality] = useState({ quality: 'unknown', successRate: 0 })
   
   const messageHandlersRef = useRef(new Map())
   const reconnectTimeoutRef = useRef(null)
   const heartbeatIntervalRef = useRef(null)
+  const fallbackManagerRef = useRef(new WebSocketFallbackManager())
 
   // Message handler registration
   const onMessage = useCallback((messageType, handler) => {
@@ -61,23 +65,31 @@ export const NewWebSocketProvider = ({ children }) => {
     }
   }, [])
 
-  // Send message with error handling
+  // Send message with error handling and fallback
   const sendMessage = useCallback((type, data = {}) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.warn('Cannot send message: WebSocket not connected')
-      return false
+    // Try WebSocket first
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        const message = { type, data, timestamp: Date.now() }
+        ws.send(JSON.stringify(message))
+        console.log('📤 Sent via WebSocket:', message)
+        return true
+      } catch (error) {
+        console.error('Failed to send via WebSocket:', error)
+        setLastError(error.message)
+      }
     }
 
-    try {
-      const message = { type, data, timestamp: Date.now() }
-      ws.send(JSON.stringify(message))
-      console.log('📤 Sent:', message)
-      return true
-    } catch (error) {
-      console.error('Failed to send message:', error)
-      setLastError(error.message)
-      return false
+    // Fallback to localStorage sync if WebSocket is unavailable
+    console.warn('WebSocket not connected, using localStorage fallback')
+    setUsingFallback(true)
+    const success = fallbackManagerRef.current.sendViaLocalSync(type, data)
+    
+    if (success) {
+      console.log('📤 Sent via localStorage fallback:', { type, data })
     }
+    
+    return success
   }, [ws])
 
   // Simplified API methods
@@ -152,27 +164,40 @@ export const NewWebSocketProvider = ({ children }) => {
     return sendMessage(MESSAGE_TYPES.SETTINGS_UPDATE, settings)
   }, [sendMessage])
 
-  // WebSocket connection management
+  // WebSocket connection management with fallback
   const connect = useCallback(() => {
     if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
       return // Already connecting or connected
     }
 
+    const fallbackManager = fallbackManagerRef.current
+
     try {
       console.log('🔗 Connecting to WebSocket...')
       setConnectionStatus('connecting')
       setLastError(null)
+      setUsingFallback(false)
 
-      // Use environment variable or fallback to localhost
-      const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3002/ws'
-      console.log('🔗 Connecting to WebSocket:', wsUrl)
+      // Get next server URL to try (with rotation)
+      const wsUrl = fallbackManager.getNextServerUrl()
+      console.log('🔗 Attempting connection to:', wsUrl, `(Attempt ${fallbackManager.reconnectAttempts + 1})`)
+      
       const websocket = new WebSocket(wsUrl)
       
       websocket.onopen = () => {
-        console.log('✅ WebSocket connected')
+        console.log('✅ WebSocket connected successfully!')
         setConnectionStatus('connected')
         setWs(websocket)
         setLastError(null)
+        setUsingFallback(false)
+        
+        // Record successful connection
+        fallbackManager.recordConnectionAttempt(wsUrl, true)
+        fallbackManager.reset() // Reset reconnection counter
+        
+        // Update connection quality
+        const quality = fallbackManager.getConnectionQuality()
+        setConnectionQuality(quality)
         
         // Aggressive heartbeat for Render.com free tier (prevents sleeping)
         heartbeatIntervalRef.current = setInterval(() => {
@@ -212,9 +237,12 @@ export const NewWebSocketProvider = ({ children }) => {
       }
 
       websocket.onclose = (event) => {
-        console.log('🔌 WebSocket disconnected:', event.reason)
+        console.log('🔌 WebSocket disconnected:', event.reason || 'Unknown reason')
         setConnectionStatus('disconnected')
         setWs(null)
+        
+        // Record failed connection
+        fallbackManager.recordConnectionAttempt(wsUrl, false, event.reason)
         
         // Clear heartbeat
         if (heartbeatIntervalRef.current) {
@@ -222,11 +250,21 @@ export const NewWebSocketProvider = ({ children }) => {
           heartbeatIntervalRef.current = null
         }
         
-        // Fast auto-reconnect for minimal downtime
-        if (event.code !== 1000) { // 1000 = normal closure
+        // Enable localStorage fallback immediately
+        setUsingFallback(true)
+        fallbackManager.startLocalSync()
+        console.log('📱 Enabled localStorage fallback mode')
+        
+        // Auto-reconnect with exponential backoff (if not manual disconnect)
+        if (event.code !== 1000 && !fallbackManager.isManualDisconnect) {
+          fallbackManager.reconnectAttempts++
+          const delay = fallbackManager.getReconnectDelay()
+          
+          console.log(`⏳ Reconnecting in ${(delay / 1000).toFixed(1)}s... (Attempt ${fallbackManager.reconnectAttempts})`)
+          
           reconnectTimeoutRef.current = setTimeout(() => {
             connect()
-          }, 1000) // Faster reconnect: 1 second instead of 3
+          }, delay)
         }
       }
 
@@ -234,16 +272,33 @@ export const NewWebSocketProvider = ({ children }) => {
         console.error('❌ WebSocket error:', error)
         setConnectionStatus('error')
         setLastError('Connection error')
+        
+        // Record error
+        fallbackManager.recordConnectionAttempt(wsUrl, false, 'Connection error')
       }
 
     } catch (error) {
       console.error('Failed to create WebSocket:', error)
       setConnectionStatus('error')
       setLastError(error.message)
+      
+      // Enable fallback mode on connection failure
+      setUsingFallback(true)
+      fallbackManager.startLocalSync()
+      
+      // Retry with next server
+      fallbackManager.reconnectAttempts++
+      const delay = fallbackManager.getReconnectDelay()
+      reconnectTimeoutRef.current = setTimeout(() => {
+        connect()
+      }, delay)
     }
   }, [sendMessage])
 
   const disconnect = useCallback(() => {
+    const fallbackManager = fallbackManagerRef.current
+    fallbackManager.isManualDisconnect = true
+    
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current)
       reconnectTimeoutRef.current = null
@@ -254,12 +309,16 @@ export const NewWebSocketProvider = ({ children }) => {
       heartbeatIntervalRef.current = null
     }
     
+    // Stop fallback sync
+    fallbackManager.stopLocalSync()
+    
     if (ws) {
       ws.close(1000, 'Manual disconnect')
       setWs(null)
     }
     
     setConnectionStatus('disconnected')
+    setUsingFallback(false)
   }, [ws])
 
   // Auto-connect on mount
@@ -268,6 +327,8 @@ export const NewWebSocketProvider = ({ children }) => {
     
     return () => {
       disconnect()
+      // Cleanup fallback manager
+      fallbackManagerRef.current.cleanup()
     }
   }, [])
 
@@ -278,6 +339,8 @@ export const NewWebSocketProvider = ({ children }) => {
     isConnected: connectionStatus === 'connected',
     lastError,
     messageCount,
+    usingFallback,
+    connectionQuality,
     
     // Connection control
     connect,

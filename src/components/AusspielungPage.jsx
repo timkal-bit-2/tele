@@ -4,12 +4,16 @@ import { useTeleprompterClient } from '../hooks/useTeleprompterClient.js'
 import { useIpadScrollEngine } from '../hooks/useIpadScrollEngine.js'
 import { MESSAGE_TYPES, STATES } from '../types/teleprompterProtocol.js'
 import { calculateTextHash } from '../utils/lineCalculator.js'
+import P2PConnection from './P2PConnection'
+import MetaShell from './MetaShell'
 
 const AusspielungPageInternal = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [hasUserInteracted, setHasUserInteracted] = useState(false)
+  const [showP2PPanel, setShowP2PPanel] = useState(false)
+  const [isP2PConnected, setIsP2PConnected] = useState(false)
   const containerRef = useRef(null)
   
   // Initialize teleprompter client
@@ -157,6 +161,54 @@ const AusspielungPageInternal = () => {
     }
   }, [teleprompterClient, scrollEngine])
 
+  // P2P Connection Handlers
+  const handleP2PConnectionEstablished = (connection) => {
+    console.log('✅ iPad P2P Connection established!')
+    setIsP2PConnected(true)
+  }
+  
+  const handleP2PConnectionLost = () => {
+    console.log('❌ iPad P2P Connection lost')
+    setIsP2PConnected(false)
+  }
+  
+  const handleP2PMessage = (message) => {
+    console.log('📥 iPad received P2P message:', message)
+    
+    // Handle different message types
+    if (message.type === 'CONTENT_UPDATE' && message.data) {
+      const { content, settings } = message.data
+      
+      if (content) {
+        const hash = calculateTextHash(content)
+        const version = Date.now()
+        scrollEngine.loadScript(content, version, hash)
+      }
+      
+      if (settings) {
+        scrollEngine.updateParams({
+          speed: (settings.speed || 0.2) * 300,
+          fontSize: settings.fontSize || 48,
+          lineHeight: settings.lineHeight || 1.4,
+          mirror: {
+            horizontal: settings.mirrorHorizontal || false,
+            vertical: settings.mirrorVertical || false
+          },
+          margins: settings.padding || 20
+        })
+      }
+    }
+    
+    if (message.type === 'SCROLL_POSITION' && message.data) {
+      // Sync scroll position from laptop
+      const { scrollPosition } = message.data
+      if (scrollPosition !== undefined) {
+        // Could implement remote scroll control here
+        console.log('Remote scroll position:', scrollPosition)
+      }
+    }
+  }
+
   // Handle user interaction for iOS Safari
   const handleUserInteraction = () => {
     if (!hasUserInteracted) {
@@ -288,11 +340,46 @@ const AusspielungPageInternal = () => {
             </div>
             
             <button
+              onClick={() => setShowP2PPanel(!showP2PPanel)}
+              className={`px-3 py-2 rounded text-white text-sm transition-colors ${
+                isP2PConnected ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 hover:bg-gray-500'
+              }`}
+            >
+              {isP2PConnected ? '🔗 P2P Connected' : '🔗 Connect to Laptop'}
+            </button>
+            
+            <button
               onClick={toggleFullscreen}
               className="px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm transition-colors"
+              data-fullscreen-toggle
             >
               {isFullscreen ? '🔲 Exit Fullscreen' : '⛶ Fullscreen'}
             </button>
+          </div>
+        </div>
+      )}
+      
+      {/* P2P Connection Panel - shows when requested */}
+      {showP2PPanel && !isFullscreen && (
+        <div className="absolute top-16 right-4 z-40 w-96 max-w-full">
+          <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-2xl">
+            <div className="flex items-center justify-between p-3 border-b border-gray-700">
+              <h3 className="text-sm font-bold text-white">Direct Connection to Laptop</h3>
+              <button
+                onClick={() => setShowP2PPanel(false)}
+                className="text-gray-400 hover:text-white text-xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-3">
+              <P2PConnection
+                mode="client"
+                onConnectionEstablished={handleP2PConnectionEstablished}
+                onConnectionLost={handleP2PConnectionLost}
+                onMessage={handleP2PMessage}
+              />
+            </div>
           </div>
         </div>
       )}
@@ -457,7 +544,99 @@ const AusspielungPageInternal = () => {
   )
 }
 
-// Direct export - no wrapper needed, client is self-contained
-const AusspielungPage = AusspielungPageInternal
+// Meta Shell Wrapper - Progressive Enhancement Layer
+const AusspielungPage = () => {
+  const [isFullscreenInternal, setIsFullscreenInternal] = useState(false)
+  const innerPageRef = useRef(null)
+
+  // Extract state from inner component for context panel
+  // This is a bridge layer - non-invasive
+  
+  const navigationItems = [
+    {
+      icon: '🏠',
+      label: 'Home',
+      onClick: () => window.location.href = '/',
+      position: 'top'
+    },
+    {
+      icon: '🎛️',
+      label: 'Regie',
+      onClick: () => window.location.href = '/regie',
+      position: 'top'
+    },
+    {
+      icon: '⛶',
+      label: isFullscreenInternal ? 'Exit Fullscreen' : 'Fullscreen',
+      onClick: () => {
+        // Will be handled by inner component
+        const fullscreenBtn = document.querySelector('[data-fullscreen-toggle]')
+        if (fullscreenBtn) fullscreenBtn.click()
+      },
+      position: 'bottom'
+    }
+  ]
+
+  const contextSections = [
+    {
+      title: 'Status',
+      content: (
+        <div className="meta-context-section__content">
+          <div className="meta-status meta-status--info">
+            <span className="meta-status__indicator"></span>
+            <span>Teleprompter Active</span>
+          </div>
+        </div>
+      )
+    },
+    {
+      title: 'Quick Info',
+      content: (
+        <div className="meta-context-section__content">
+          <div className="meta-metric">
+            <span className="meta-metric__label">Device</span>
+            <span className="meta-metric__value">iPad</span>
+          </div>
+          <div className="meta-metric">
+            <span className="meta-metric__label">Mode</span>
+            <span className="meta-metric__value">Display</span>
+          </div>
+        </div>
+      )
+    },
+    {
+      title: 'Help',
+      content: (
+        <div className="meta-context-section__content">
+          <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-secondary)', lineHeight: 'var(--line-height-relaxed)' }}>
+            Touch the screen to activate controls. Use buttons at bottom to control playback.
+          </p>
+        </div>
+      )
+    }
+  ]
+
+  // Listen for fullscreen changes from inner component
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreenInternal(!!document.fullscreenElement)
+    }
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  }, [])
+
+  return (
+    <MetaShell
+      navigationItems={navigationItems}
+      contextSections={contextSections}
+      isFullscreen={isFullscreenInternal}
+    >
+      {/* Existing app mounts here - completely untouched */}
+      <div ref={innerPageRef} style={{ width: '100%', height: '100%' }}>
+        <AusspielungPageInternal />
+      </div>
+    </MetaShell>
+  )
+}
 
 export default AusspielungPage
